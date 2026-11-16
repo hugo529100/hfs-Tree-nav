@@ -1,0 +1,897 @@
+/* ============================================================
+   Variables
+   ============================================================ */
+:root {
+    --tree-width: 20vw;
+    --tree-mobile-h: 25vh;
+    --tree-collapsed-w: 4px;
+
+    --tree-mask-bg: #ffffff;
+
+    --tree-scrollbar-size: 6px;
+    --tree-scrollbar-thumb: color-mix(in srgb, var(--text) 45%, transparent);
+    --tree-scrollbar-thumb-hover: color-mix(in srgb, var(--text) 75%, transparent);
+    --tree-scrollbar-track: transparent;
+
+    /* 折叠展开按钮基础 */
+    --tree-fab-bg: var(--ghost-contrast);
+    --tree-fab-bg-hover: var(--ghost-contrast);
+    --tree-fab-color: var(--text);
+    --tree-fab-size: 4px;
+    --tree-fab-size-hover: 12px;
+    --tree-fab-opacity: .9;
+    --tree-fab-opacity-hover: 1;
+
+    /* 细线静止态 */
+    --tree-fab-line-color: var(--faint-contrast);
+    --tree-fab-line-color-hover: var(--text);
+
+    /* 分界内阴影：统一黑色，白/暗模式独立 alpha */
+    --tree-shadow-alpha-light: 45%;
+    --tree-shadow-alpha-dark: 95%;
+    --tree-shadow-size: 20px;
+}
+
+:root .theme-dark {
+    --tree-mask-bg: #080500;
+}
+
+.hfs-tree-shell {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+}
+.hfs-tree-shell > * {
+    pointer-events: auto;
+}
+
+/* ============================================================
+   Close button
+   ============================================================ */
+.tree-close,
+.tree-close:focus,
+.tree-close:active {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin: 4px;
+    font-size: 14px;
+    line-height: 1;
+    opacity: .8;
+    color: var(--text) !important;
+    background: none !important;
+    border: none !important;
+    outline: none;
+    box-shadow: none !important;
+    -webkit-appearance: none;
+    appearance: none;
+    z-index: 9999;
+}
+.tree-close:hover {
+    opacity: 1;
+    color: var(--text) !important;
+    background: var(--bg) !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+.tree-close .icon {
+    font-size: 12px;
+    color: inherit !important;
+}
+
+/* ============================================================
+   Drag resizer —— 基础
+   ============================================================ */
+.tree-resizer {
+    position: absolute;
+    z-index: 4;
+    background: transparent;
+    touch-action: none;
+    user-select: none;
+    transition: background-color .15s ease;
+}
+.tree-resizer::before {
+    content: '';
+    position: absolute;
+    background: transparent;
+    pointer-events: auto;
+    cursor: inherit;
+}
+.tree-resizer::after {
+    content: '';
+    position: absolute;
+    background: var(--faint-contrast);
+    transition: background-color .15s ease, width .15s ease, height .15s ease;
+}
+.tree-resizer:hover::after,
+body.tree-resizing .tree-resizer::after {
+    background: var(--text);
+}
+
+.tree-resizer-grip {
+    position: absolute;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    pointer-events: auto;
+    touch-action: none;
+    user-select: none;
+    background: var(--bg);
+    border: 1px solid var(--faint-contrast);
+    border-radius: 4px;
+    color: var(--faint-contrast);
+    opacity: .85;
+    transition: color .15s ease, border-color .15s ease, opacity .15s ease,
+                transform .15s ease;
+}
+.tree-resizer-grip::before,
+.tree-resizer-grip::after {
+    content: '';
+    display: block;
+    background: currentColor;
+    border-radius: 1px;
+}
+
+.tree-resizer:hover .tree-resizer-grip,
+.tree-resizer-grip:hover,
+body.tree-resizing .tree-resizer-grip {
+    color: var(--text);
+    border-color: var(--text);
+    opacity: 1;
+}
+
+/* ============================================================
+   折叠展开按钮 .tree-fab.collapsed —— 基础
+   hint 动画由 main.js 注入并 inline 驱动，这里只给静止外观
+   ============================================================ */
+.tree-fab.collapsed {
+    position: fixed;
+    z-index: 9999;
+    padding: 0;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0;
+    box-shadow: none;
+    background: var(--tree-fab-bg);
+    color: var(--tree-fab-color);
+    opacity: var(--tree-fab-opacity);
+    transition: width .15s ease, height .15s ease,
+                opacity .15s ease, background-color .15s ease,
+                color .15s ease;
+}
+.tree-fab.collapsed .icon { display: none; }
+.tree-fab.collapsed:hover { opacity: var(--tree-fab-opacity-hover); }
+
+/* 细线（真实元素，动画由 JS 控制） */
+.tree-fab-line {
+    display: block;
+    border-radius: 1px;
+    background: var(--tree-fab-line-color);
+    opacity: .8;
+    pointer-events: none;
+}
+
+/* 横屏：左侧竖条 */
+@media (orientation: landscape) {
+    .tree-fab.collapsed {
+        top: 50%;
+        left: 0;
+        right: auto;
+        transform: translateY(-50%);
+        width: var(--tree-fab-size);
+        height: 80px;
+        border-radius: 0 4px 4px 0;
+        flex-direction: column;
+        background: var(--tree-fab-bg);
+        color: var(--tree-fab-color);
+    }
+    .tree-fab-line {
+        width: 2px;
+        height: 40px;
+    }
+    .tree-fab.collapsed:hover {
+        width: var(--tree-fab-size-hover);
+        background: var(--tree-fab-bg-hover);
+        color: var(--tree-fab-color);
+    }
+    .tree-fab.collapsed:hover .tree-fab-line {
+        background: var(--tree-fab-line-color-hover);
+        opacity: 1;
+    }
+}
+
+/* 竖屏：顶部横条 */
+@media (orientation: portrait) {
+    .tree-fab.collapsed {
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: auto;
+        transform: none;
+        width: 100%;
+        height: 14px;
+        border-radius: 0;
+        flex-direction: row;
+        background: none;
+        color: var(--tree-fab-line-color);
+    }
+    .tree-fab-line {
+        width: 44px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--bg);
+        opacity: .9;
+    }
+    .tree-fab.collapsed:hover {
+        opacity: var(--tree-fab-opacity-hover);
+        color: var(--tree-fab-line-color-hover);
+    }
+    .tree-fab.collapsed:hover .tree-fab-line {
+        background: var(--bg);
+        opacity: 1;
+    }
+}
+
+/* ============================================================
+   展开界面形态
+   ============================================================ */
+
+/* ---------- 横屏：左侧栏 ---------- */
+@media (orientation: landscape) {
+    body.hfs-tree-layout.hfs-tree-open > #banner {
+        margin-left: var(--tree-width);
+        box-sizing: border-box;
+        transition: margin-left .2s ease;
+        width: auto;
+    }
+    body.hfs-tree-layout.hfs-tree-open > #root {
+        padding-left: var(--tree-width);
+        box-sizing: border-box;
+        transition: padding-left .2s ease;
+    }
+
+    .hfs-tree-nav {
+        position: fixed;
+        left: 0; top: 0; bottom: 0;
+        width: var(--tree-width);
+        background: var(--bg);
+        border-right: 1px solid var(--faint-contrast);
+        z-index: 90;
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+    }
+    /* 右侧内阴影覆盖层（在内容之上） */
+    .hfs-tree-nav::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2;
+        box-shadow: inset calc(-1 * var(--tree-shadow-size)) 0 var(--tree-shadow-size)
+                    calc(-1 * var(--tree-shadow-size))
+                    rgba(0, 0, 0, var(--tree-shadow-alpha-light));
+    }
+    :root .theme-dark .hfs-tree-nav::after,
+    body.theme-dark .hfs-tree-nav::after {
+        box-shadow: inset calc(-1 * var(--tree-shadow-size)) 0 var(--tree-shadow-size)
+                    calc(-1 * var(--tree-shadow-size))
+                    rgba(0, 0, 0, var(--tree-shadow-alpha-dark));
+    }
+
+    body.hfs-tree-layout.hfs-tree-open .bottom-bar-stack-positioner {
+        left: var(--tree-width);
+        right: 0;
+        width: auto;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open #mmp-audio {
+        left: var(--tree-width) !important;
+        right: 0 !important;
+        width: auto !important;
+        transition: left .2s ease;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) #mmp-audio {
+        left: 0 !important;
+        right: 0 !important;
+        width: auto !important;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.file-show {
+        left: var(--tree-width) !important;
+        right: 0 !important;
+        width: auto !important;
+        transition: left .2s ease;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.file-show {
+        left: 0 !important;
+        right: 0 !important;
+        width: auto !important;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.dv-dialog-fullscreen {
+        left: var(--tree-width) !important;
+        right: 0 !important;
+        width: auto !important;
+        transition: left .2s ease;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.dv-dialog-fullscreen {
+        left: 0 !important;
+        right: 0 !important;
+        width: auto !important;
+    }
+    body.tree-resizing .dialog-backdrop.dv-dialog-fullscreen {
+        transition: none !important;
+    }
+
+    .tree-resizer {
+        top: 0; right: -4px;
+        width: 14px; height: 100%;
+        cursor: col-resize;
+        margin-right: 3px;
+    }
+    .tree-resizer::before { inset: -6px -4px; }
+    .tree-resizer::after {
+        top: 0; bottom: 0; right: 0;
+        width: 1px;
+    }
+    .tree-resizer:hover::after,
+    body.tree-resizing .tree-resizer::after {
+        width: 2px;
+    }
+    .tree-resizer-grip {
+        top: 50%; right: 4px;
+        transform: translate(50%, -50%);
+        width: 15px; height: 30px;
+        flex-direction: column;
+        cursor: col-resize;
+    }
+    .tree-resizer-grip::before {
+        width: 0; height: 0; background: transparent;
+        border-top: 3px solid transparent;
+        border-bottom: 3px solid transparent;
+        border-right: 4px solid currentColor;
+        border-radius: 0; box-shadow: none;
+    }
+    .tree-resizer-grip::after {
+        width: 0; height: 0; background: transparent;
+        border-top: 3px solid transparent;
+        border-bottom: 3px solid transparent;
+        border-left: 4px solid currentColor;
+        border-radius: 0;
+    }
+    .tree-resizer:hover .tree-resizer-grip,
+    .tree-resizer-grip:hover,
+    body.tree-resizing .tree-resizer-grip {
+        transform: translate(50%, -50%) scale(1.15);
+    }
+    body.tree-resizing { cursor: col-resize; user-select: none; }
+
+    .tree-node[data-depth="1"] > .tree-row { padding-left: 18px; --line-x: 8px; }
+    .tree-node[data-depth="2"] > .tree-row { padding-left: 32px; --line-x: 22px; }
+    .tree-node[data-depth="3"] > .tree-row { padding-left: 46px; --line-x: 36px; }
+    .tree-node[data-depth="4"] > .tree-row { padding-left: 60px; --line-x: 50px; }
+    .tree-node[data-depth="5"] > .tree-row { padding-left: 74px; --line-x: 64px; }
+    .tree-node[data-depth="6"] > .tree-row { padding-left: 88px; --line-x: 78px; }
+
+    .tree-star-slot {
+        left: calc(var(--line-x, 10px) - 14px);
+        width: 12px;
+    }
+}
+
+/* ---------- 竖屏：顶部栏 ---------- */
+@media (orientation: portrait) {
+    .hfs-tree-nav {
+        position: relative;
+    }
+
+    .hfs-tree-shell.open .hfs-tree-nav {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        height: var(--tree-mobile-h);
+        width: 100%;
+        background: var(--bg);
+        border-bottom: 1px solid var(--faint-contrast);
+        z-index: 90;
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+        animation: tree-slide-down .2s ease;
+    }
+    /* 底部内阴影覆盖层（在内容之上） */
+    .hfs-tree-shell.open .hfs-tree-nav::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2;
+        box-shadow: inset 0 calc(-1 * var(--tree-shadow-size)) var(--tree-shadow-size)
+                    calc(-1 * var(--tree-shadow-size))
+                    rgba(0, 0, 0, var(--tree-shadow-alpha-light));
+    }
+    :root .theme-dark .hfs-tree-shell.open .hfs-tree-nav::after,
+    body.theme-dark .hfs-tree-shell.open .hfs-tree-nav::after {
+        box-shadow: inset 0 calc(-1 * var(--tree-shadow-size)) var(--tree-shadow-size)
+                    calc(-1 * var(--tree-shadow-size))
+                    rgba(0, 0, 0, var(--tree-shadow-alpha-dark));
+    }
+    @keyframes tree-slide-down {
+        from { transform: translateY(-100%); }
+        to { transform: translateY(0); }
+    }
+
+    body.hfs-tree-layout.hfs-tree-open::before {
+        content: '';
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        height: var(--tree-mobile-h);
+        background: var(--tree-mask-bg);
+        z-index: 89;
+        pointer-events: none;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open)::before {
+        content: none;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open > #banner {
+        margin-top: var(--tree-mobile-h);
+        box-sizing: border-box;
+        transition: margin-top .2s ease;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) > #banner {
+        margin-top: 0;
+        box-sizing: border-box;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open header {
+        top: var(--tree-mobile-h) !important;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) header {
+        top: 0 !important;
+    }
+
+    body.hfs-tree-layout > #root {
+        padding-top: 0;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open .bottom-bar-stack-positioner {
+        bottom: 0; left: 0; right: 0; width: 100%;
+    }
+
+    body.hfs-tree-layout #mmp-audio {
+        left: 0 !important;
+        right: 0 !important;
+        width: auto !important;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.file-show {
+        top: var(--tree-mobile-h) !important;
+        bottom: 0 !important;
+        height: auto !important;
+        transition: top .2s ease;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.file-show {
+        top: 0 !important;
+        bottom: 0 !important;
+        height: auto !important;
+    }
+
+    body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.dv-dialog-fullscreen {
+        top: var(--tree-mobile-h) !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: auto !important;
+        height: auto !important;
+        transition: top .2s ease;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.dv-dialog-fullscreen {
+        top: 0 !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: auto !important;
+        height: auto !important;
+    }
+    body.tree-resizing .dialog-backdrop.dv-dialog-fullscreen {
+        transition: none !important;
+    }
+
+    .hfs-tree-nav .tree-header {
+        display: none;
+    }
+    .hfs-tree-nav .tree-scroll {
+        padding-top: 2px;
+    }
+
+    .tree-close {
+        top: auto !important;
+        bottom: 0;
+        right: 0;
+        margin-bottom: 1px;
+        margin-right: 1px;
+        background: none !important;
+        z-index: 99999;
+    }
+    .hfs-tree-nav .tree-scroll {
+        padding-bottom: 38px;
+    }
+
+    .tree-resizer {
+        top: auto; bottom: -4px;
+        left: 0; right: 0;
+        width: 100%; height: 18px;
+        cursor: row-resize;
+        margin-bottom: 3px;
+    }
+    .tree-resizer::before { inset: -4px -6px; }
+    .tree-resizer::after {
+        top: auto; bottom: 0;
+        left: 0; right: 0;
+        width: auto; height: 1px;
+    }
+    .tree-resizer:hover::after,
+    body.tree-resizing .tree-resizer::after {
+        height: 2px; width: auto;
+    }
+    .tree-resizer-grip {
+        top: auto; bottom: 0;
+        left: 50%; right: auto;
+        transform: translate(-50%, 50%);
+        width: 34px; height: 18px;
+        flex-direction: row;
+        cursor: row-resize;
+        animation: tree-grip-pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes tree-grip-pulse {
+        0%, 100% { opacity: .7; }
+        50%      { opacity: 1; }
+    }
+    .tree-resizer-grip::before {
+        width: 0; height: 0; background: transparent;
+        border-left: 3px solid transparent;
+        border-right: 3px solid transparent;
+        border-bottom: 4px solid currentColor;
+        border-top: none;
+        border-radius: 0; box-shadow: none;
+    }
+    .tree-resizer-grip::after {
+        width: 0; height: 0; background: transparent;
+        border-left: 3px solid transparent;
+        border-right: 3px solid transparent;
+        border-top: 4px solid currentColor;
+        border-bottom: none;
+        border-radius: 0;
+    }
+    body.tree-resizing .tree-resizer-grip { animation: none; }
+    .tree-resizer:hover .tree-resizer-grip,
+    .tree-resizer-grip:hover,
+    body.tree-resizing .tree-resizer-grip {
+        transform: translate(-50%, 50%) scale(1.15);
+    }
+    body.tree-resizing { cursor: row-resize; user-select: none; }
+
+    .tree-node[data-depth="1"] > .tree-row { padding-left: 14px; --line-x: 4px; }
+    .tree-node[data-depth="2"] > .tree-row { padding-left: 26px; --line-x: 16px; }
+    .tree-node[data-depth="3"] > .tree-row { padding-left: 38px; --line-x: 28px; }
+    .tree-node[data-depth="4"] > .tree-row { padding-left: 50px; --line-x: 40px; }
+    .tree-node[data-depth="5"] > .tree-row { padding-left: 62px; --line-x: 52px; }
+    .tree-node[data-depth="6"] > .tree-row { padding-left: 74px; --line-x: 64px; }
+
+    .tree-star-slot {
+        left: calc(var(--line-x, 6px) - 12px);
+        width: 11px;
+    }
+}
+
+body.tree-resizing #banner,
+body.tree-resizing #root,
+body.tree-resizing #mmp-audio,
+body.tree-resizing .dialog-backdrop.file-show,
+body.tree-resizing .bottom-bar-stack-positioner {
+    transition: none !important;
+}
+
+/* ============================================================
+   Tree internals
+   ============================================================ */
+.tree-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    border-bottom: 1px solid var(--faint-contrast);
+    flex: 0 0 auto;
+    padding: 4px 26px 4px 8px;   /* 右侧 26px 避开 .tree-close */
+}
+.tree-title {
+    font-weight: 600;
+    font-size: 13px;
+    opacity: .85;
+    flex: 0 0 auto;
+}
+
+.tree-header-stats {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 60%;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+    color: var(--faint-contrast);
+}
+
+.tree-scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 4px 0 20px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text) var(--bg);
+}
+.tree-scroll::-webkit-scrollbar {
+    width: var(--tree-scrollbar-size);
+    height: var(--tree-scrollbar-size);
+}
+.tree-scroll::-webkit-scrollbar-track {
+    background: var(--tree-scrollbar-track);
+}
+.tree-scroll::-webkit-scrollbar-thumb {
+    background: var(--tree-scrollbar-thumb);
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+}
+.tree-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--tree-scrollbar-thumb-hover);
+}
+.tree-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+.tree-root,
+.tree-children,
+.tree-starred-section {
+    min-width: max-content;
+}
+
+.tree-node, .tree-root { user-select: none; }
+.tree-node { position: relative; }
+.tree-children { position: relative; }
+
+.tree-node > .tree-row::before {
+    content: '';
+    position: absolute;
+    left: var(--line-x, 10px);
+    top: 0;
+    bottom: 50%;
+    width: 1px;
+    background: var(--faint-contrast);
+    pointer-events: none;
+}
+.tree-node:not(:last-child) > .tree-row::before {
+    bottom: 0;
+}
+.tree-node > .tree-row::after {
+    content: '';
+    position: absolute;
+    left: var(--line-x, 10px);
+    top: 50%;
+    width: 8px;
+    height: 1px;
+    background: var(--faint-contrast);
+    pointer-events: none;
+}
+.tree-root > .tree-row::before,
+.tree-root > .tree-row::after {
+    display: none;
+}
+
+.tree-node.in-subtree-node > .tree-row::before,
+.tree-node.in-subtree-node > .tree-row::after {
+    background: var(--text);
+}
+.tree-node.in-subtree-node > .tree-row.current::before,
+.tree-node.in-subtree-node > .tree-row.current::after {
+    background: var(--bg);
+    opacity: .35;
+}
+
+.tree-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    padding: 3px 6px 3px 0;
+    cursor: pointer;
+    white-space: nowrap;
+    border-radius: 3px;
+    font-size: 14px;
+    color: var(--text);
+    opacity: 0.65;
+    transition: color .15s ease, background-color .15s ease, opacity .15s ease;
+}
+.tree-row:hover {
+    background: var(--ghost-contrast);
+    color: var(--text);
+}
+
+.tree-star-slot {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    text-align: center;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--faint-contrast);
+    opacity: 1;
+    cursor: pointer;
+    user-select: none;
+    z-index: 1;
+    transition: color .15s ease, opacity .15s ease;
+}
+.tree-star-slot:hover {
+    opacity: 1;
+    color: var(--text);
+}
+.tree-star-slot.starred {
+    opacity: 1;
+    color: var(--text);
+}
+.tree-star-slot.starred:hover {
+    opacity: 1;
+    color: var(--text);
+}
+
+.tree-row.current .tree-star-slot {
+    color: var(--bg);
+    opacity: .6;
+}
+.tree-row.current .tree-star-slot.starred {
+    color: var(--bg);
+    opacity: 1;
+}
+.tree-row.current .tree-star-slot:hover {
+    opacity: 1;
+}
+
+.tree-row.current {
+    background: var(--text);
+    color: var(--bg);
+    font-weight: 500;
+    opacity: 1;
+    width: fit-content;
+}
+
+.tree-row.in-subtree {
+    color: var(--text);
+    opacity: 0.95;
+}
+.tree-row.in-subtree:hover {
+    color: var(--text);
+    opacity: 1;
+}
+.tree-row.in-subtree.current {
+    opacity: 1;
+}
+
+.tree-arrow {
+    width: 14px;
+    text-align: center;
+    font-size: 14px;
+    color: inherit;
+    display: inline-block;
+    flex: 0 0 auto;
+}
+.tree-row .icon {
+    flex: 0 0 auto;
+    width: 1.2em;
+    text-align: center;
+    color: inherit;
+}
+
+.tree-name {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    padding-left: 2px;
+    min-width: 0;
+    max-width: none;
+}
+
+.tree-loading { padding: 10px; color: var(--mild-contrast); }
+
+/* ============================================================
+   Starred folders section
+   ============================================================ */
+.tree-starred-section {
+    padding: 2px 0 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--faint-contrast);
+}
+.tree-starred-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+    border-radius: 3px;
+    color: var(--text);
+    white-space: nowrap;
+    transition: background-color .15s ease, color .15s ease;
+}
+.tree-starred-row:hover {
+    background: var(--ghost-contrast);
+}
+.tree-starred-row.current {
+    background: var(--ghost-contrast);
+    color: var(--text);
+}
+.tree-starred-row.current:hover {
+    background: var(--faint-contrast);
+}
+.tree-starred-icon {
+    flex: 0 0 auto;
+    width: 1.2em;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text);
+}
+.tree-starred-row.current .tree-starred-icon {
+    color: var(--text);
+}
+.tree-starred-name {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    min-width: 0;
+    max-width: none;
+}
+.tree-starred-remove {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: inherit;
+    opacity: .5;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    border-radius: 3px;
+    box-shadow: none;
+}
+.tree-starred-remove:hover {
+    opacity: 1;
+}
+
+/* ============================================================
+   ★ 选中行图标反色
+   ============================================================ */
+body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon,
+body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon::before,
+body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon::after,
+body.hfs-tree-layout .hfs-tree-nav .tree-row.current .tree-arrow,
+body.hfs-tree-layout .hfs-tree-nav .tree-row.current .tree-star-slot {
+    color: var(--bg) !important;
+    -webkit-text-fill-color: var(--bg) !important;
+    text-fill-color: var(--bg) !important;
+    text-shadow: none !important;
+}
