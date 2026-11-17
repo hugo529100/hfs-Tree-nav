@@ -1,4 +1,4 @@
-"use strict"; {
+﻿"use strict"; {
     const cfg = HFS.getPluginConfig()
     const VISITED_URI_KEY = 'tree-nav-visited-uris-v1'
     const STATE_KEY = 'tree-nav-open-v1'
@@ -361,6 +361,28 @@ function getRootLabel() {
         return decorated.map(d => d.it)
     }
 
+    // 原生 state 的 comment 偶爾不完整時，從原生列表 DOM 的 .entry-comment 補回
+    function getNativeDomComments(uri) {
+        const wrappers = document.querySelectorAll('.list-wrapper[uri]')
+        let wrapper = null
+        for (const el of wrappers) {
+            if (canonicalUri(el.getAttribute('uri') || '') === uri) { wrapper = el; break }
+        }
+        if (!wrapper) return null
+
+        const map = new Map()
+        wrapper.querySelectorAll('li.folder').forEach(li => {
+            const a = li.querySelector('a[href]')
+            const c = li.querySelector('.entry-comment')
+            const text = c ? String(c.textContent || '').trim() : ''
+            if (!a || !text) return
+            try {
+                map.set(canonicalUri(a.getAttribute('href')), text)
+            } catch {}
+        })
+        return map
+    }
+
     function buildDirsFromList(uri, list) {
         uri = canonicalUri(uri)
 
@@ -379,17 +401,19 @@ function getRootLabel() {
             }
         }
 
+        const nativeDomComments = getNativeDomComments(uri)
+
         let dirs = (Array.isArray(list) ? list : [])
-            .filter(x => x && x.n && x.n.endsWith('/'))
+            .filter(x => x && x.n && (x.isFolder === true || String(x.n).endsWith('/')))
             .map(x => {
-                const rawName = x.n.replace(/\/$/, '')
+                const rawName = String(x.n).replace(/\/$/, '')
                 const name = decodeName(rawName)
-                const childUri = canonicalUri(uri + rawName)
+                const childUri = x.uri ? canonicalUri(x.uri) : canonicalUri(uri + rawName)
                 return {
                     name, uri: childUri, raw: rawName,
                     isFolder: true, size: 0,
                     mtime: x.m || x.c || null,
-                    comment: x.comment || x.commentText || '',
+                    comment: (nativeDomComments && nativeDomComments.get(childUri)) || x.comment || x.commentText || '',
                     children: [],
                 }
             })
@@ -418,8 +442,71 @@ function getRootLabel() {
         return dirs
     }
 
+    // 目前頁面的原生列表已由 HFS 取得；等它載入完成後直接重用，
+    // 避免 Tree-nav 再發一次 get_file_list，也讓 comment/內容保持同步。
+    function waitForNativeList(uri, timeout = 3000) {
+        const st = HFS.state
+        if (!st || canonicalUri(st.uri || '') !== uri) return Promise.resolve(null)
+        if (!st.loading && Array.isArray(st.list) && st.list.length > 0) {
+            return Promise.resolve(st.list)
+        }
+        if (typeof HFS.watchState !== 'function') {
+            return Promise.resolve(!st.loading && Array.isArray(st.list) ? st.list : null)
+        }
+
+        return new Promise(resolve => {
+            let done = false
+            let sawLoading = !!st.loading
+            const offs = []
+            let timer = null
+
+            const finish = value => {
+                if (done) return
+                done = true
+                if (timer) clearTimeout(timer)
+                offs.forEach(off => { try { off && off() } catch {} })
+                resolve(value)
+            }
+
+            const check = () => {
+                const s = HFS.state
+                if (!s || canonicalUri(s.uri || '') !== uri) return finish(null)
+                if (s.loading) { sawLoading = true; return }
+                if (!Array.isArray(s.list)) return
+                if (s.list.length > 0 || sawLoading) return finish(s.list)
+                // 尚未看到 loading、列表也還是空的：再給原生請求一點時間
+            }
+
+            try {
+                if (typeof HFS.watchState === 'function') {
+                    offs.push(HFS.watchState('loading', check, false))
+                    offs.push(HFS.watchState('uri', check, false))
+                }
+            } catch {}
+
+            timer = setTimeout(() => {
+                const s = HFS.state
+                if (!s || canonicalUri(s.uri || '') !== uri) return finish(null)
+                if (s.loading) return finish(null)
+                finish(Array.isArray(s.list) ? s.list : null)
+            }, timeout)
+
+            if (!st.loading && (!Array.isArray(st.list) || st.list.length === 0)) {
+                // 空資料夾也要在短暫等待後結束，避免一直懸掛
+                setTimeout(() => {
+                    const s = HFS.state
+                    if (!s || canonicalUri(s.uri || '') !== uri) return finish(null)
+                    if (s.loading) return
+                    if (Array.isArray(s.list)) finish(s.list)
+                }, 300)
+            }
+        })
+    }
+
     async function fetchDirs(uri) {
         uri = canonicalUri(uri)
+        const nativeList = await waitForNativeList(uri)
+        if (nativeList !== null) return buildDirsFromList(uri, nativeList)
         const url = '/~/api/get_file_list?uri=' + encodeURIComponent(uri)
         const r = await fetch(url, { credentials: 'same-origin' })
         if (!r.ok) throw new Error('get_file_list failed ' + r.status)
@@ -487,10 +574,10 @@ function getRootLabel() {
             const oldMap = new Map((root.children || []).map(c => [c.uri, c]))
             const next = dirs.map(d => {
                 const old = oldMap.get(d.uri)
-                return old ? { ...d, children: old.children || [], _loaded: !!old._loaded } : d
+                return old ? { ...d, comment: d.comment || old.comment || '', children: old.children || [], _loaded: !!old._loaded } : d
             })
-            const oldKeys = (root.children || []).map(c => c.uri + '|' + c.name).join('\n')
-            const newKeys = next.map(c => c.uri + '|' + c.name).join('\n')
+            const oldKeys = (root.children || []).map(c => c.uri + '|' + c.name + '|' + (c.comment || '')).join('\n')
+            const newKeys = next.map(c => c.uri + '|' + c.name + '|' + (c.comment || '')).join('\n')
             root.children = next
             root._loaded = true
             return oldKeys !== newKeys
@@ -518,10 +605,10 @@ function getRootLabel() {
         const oldMap = new Map((node.children || []).map(c => [c.uri, c]))
         const next = dirs.map(d => {
             const old = oldMap.get(d.uri)
-            return old ? { ...d, children: old.children || [], _loaded: !!old._loaded } : d
+            return old ? { ...d, comment: d.comment || old.comment || '', children: old.children || [], _loaded: !!old._loaded } : d
         })
-        const oldKeys = (node.children || []).map(c => c.uri + '|' + c.name).join('\n')
-        const newKeys = next.map(c => c.uri + '|' + c.name).join('\n')
+        const oldKeys = (node.children || []).map(c => c.uri + '|' + c.name + '|' + (c.comment || '')).join('\n')
+        const newKeys = next.map(c => c.uri + '|' + c.name + '|' + (c.comment || '')).join('\n')
         node.children = next
         node._loaded = true
         return oldKeys !== newKeys
@@ -534,7 +621,7 @@ function getRootLabel() {
             node.children = dirs.map(d => {
                 const old = oldMap.get(d.uri)
                 if (old) {
-                    return { ...d, children: old.children || [], _loaded: !!old._loaded }
+                    return { ...d, comment: d.comment || old.comment || '', children: old.children || [], _loaded: !!old._loaded }
                 }
                 return d
             })
@@ -556,6 +643,26 @@ function getRootLabel() {
 
     const origFetchRef = { current: null }
     const GET_LIST_RE = /\/~\/api\/get_file_list(?:\?|$)/
+    const sharedListFetches = new Map()
+    const LIST_SHARE_TTL = 300
+
+    function makeSharedListResponse(data) {
+        return new Response(JSON.stringify(data), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        })
+    }
+
+    function noteListData(reqUri, data) {
+        try {
+            const changed = upsertNodeByList(reqUri, data.list)
+            if (changed) {
+                window.dispatchEvent(new CustomEvent('tree-nav-tree-updated', {
+                    detail: { uri: reqUri },
+                }))
+            }
+        } catch {}
+    }
 
     function installGetFileListTap() {
         if (window.__treeNavListTapInstalled) return
@@ -565,27 +672,61 @@ function getRootLabel() {
         origFetchRef.current = origFetch
 
         window.fetch = async function (input, init) {
-            const res = await origFetch(input, init)
+            let url = ''
             try {
-                const url = typeof input === 'string'
-                    ? input
-                    : (input && input.url) || ''
-                if (GET_LIST_RE.test(url) && res.ok) {
-                    const m = url.match(/[?&]uri=([^&]+)/)
-                    const reqUri = m ? canonicalUri(decodeURIComponent(m[1])) : '/'
-                    res.clone().json().then(data => {
-                        const changed = upsertNodeByList(reqUri, data.list)
-                        if (changed) {
-                            try {
-                                window.dispatchEvent(new CustomEvent('tree-nav-tree-updated', {
-                                    detail: { uri: reqUri },
-                                }))
-                            } catch {}
-                        }
-                    }).catch(() => {})
-                }
+                url = typeof input === 'string' ? input : (input && input.url) || ''
             } catch {}
-            return res
+
+            const isList = GET_LIST_RE.test(url)
+            let reqUri = '/'
+            let reqKey = url
+            if (isList) {
+                try {
+                    const u = new URL(url, location.origin)
+                    const params = Array.from(u.searchParams.entries())
+                        .filter(([k]) => k !== '_t' && k !== 't')
+                        .sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]))
+                    reqKey = u.pathname + '?' + params.map(([k, v]) => k + '=' + v).join('&')
+                    reqUri = canonicalUri(u.searchParams.get('uri') || '/')
+                } catch {}
+            }
+
+            if (isList) {
+                const shared = sharedListFetches.get(reqKey)
+                if (shared) {
+                    try {
+                        const data = shared.data || (shared.pending ? await shared.pending : null)
+                        if (data) return makeSharedListResponse(data)
+                    } catch {}
+                    if (sharedListFetches.get(reqKey) === shared) sharedListFetches.delete(reqKey)
+                }
+            }
+
+            const network = origFetch(input, init)
+            if (!isList) return network
+
+            const entry = { data: null, pending: null, ts: Date.now() }
+            const dataPromise = network.then(res => {
+                if (!res.ok) throw new Error('get_file_list ' + res.status)
+                return res.clone().json()
+            })
+            entry.pending = dataPromise
+            sharedListFetches.set(reqKey, entry)
+
+            dataPromise.then(data => {
+                if (!data) return
+                entry.data = data
+                entry.pending = null
+                entry.ts = Date.now()
+                noteListData(reqUri, data)
+                setTimeout(() => {
+                    if (sharedListFetches.get(reqKey) === entry) sharedListFetches.delete(reqKey)
+                }, LIST_SHARE_TTL)
+            }).catch(() => {
+                if (sharedListFetches.get(reqKey) === entry) sharedListFetches.delete(reqKey)
+            })
+
+            return network
         }
     }
 
@@ -807,6 +948,7 @@ function getRootLabel() {
             : 'fa-folder'
 
         const starredNow = isStarred(node.uri)
+        const comment = String(node.comment || '').trim()
 
         const onStarClick = e => {
             e.stopPropagation()
@@ -843,6 +985,12 @@ function getRootLabel() {
                     'aria-hidden': 'true',
                 }),
                 h('span', { className: 'tree-name' }, decodeName(node.name)),
+                comment
+                    ? h('span', {
+                        className: 'tree-comment',
+                        title: comment,
+                    }, comment)
+                    : null,
             ),
             open && children.length > 0 && h('div', { className: 'tree-children' },
                 children.map(c => h(TreeNode, {
@@ -1316,11 +1464,43 @@ h('div', { className: 'tree-header' },
         React.useEffect(() => {
             let lastUri = readCurrentUri()
             let lastSort = sortKey()
+            let lastNativeListSig = ''
+
+            const syncNativeList = () => {
+                const st = HFS.state
+                if (!st || st.loading || !Array.isArray(st.list)) return
+                const listUri = canonicalUri(st.uri || readCurrentUri())
+                const folders = st.list.filter(x => x && x.n && (x.isFolder === true || String(x.n).endsWith('/')))
+                let domComments = ''
+                try {
+                    const wrappers = document.querySelectorAll('.list-wrapper[uri]')
+                    for (const w of wrappers) {
+                        if (canonicalUri(w.getAttribute('uri') || '') !== listUri) continue
+                        domComments = Array.from(w.querySelectorAll('li.folder .entry-comment'))
+                            .map(c => String(c.textContent || '').trim()).join('\u0001')
+                        break
+                    }
+                } catch {}
+                const sig = listUri + '\u0002' +
+                    folders.map(x => String(x.n).replace(/\/$/, '') + '\u0001' + (x.comment || x.commentText || '')).join('\u0002') +
+                    '\u0002' + domComments
+                if (sig === lastNativeListSig) return
+                lastNativeListSig = sig
+                try {
+                    if (upsertNodeByList(listUri, st.list)) {
+                        window.dispatchEvent(new CustomEvent('tree-nav-tree-updated', {
+                            detail: { uri: listUri },
+                        }))
+                    }
+                } catch {}
+            }
+
             const sync = () => {
                 const cur = readCurrentUri()
                 if (cur !== lastUri) { lastUri = cur; setCurrentUri(cur) }
                 const s = sortKey()
                 if (s !== lastSort) { lastSort = s; setSortSig(s) }
+                syncNativeList()
                 rebuildIconMap()
             }
             let offs = []
@@ -1336,7 +1516,7 @@ h('div', { className: 'tree-header' },
             } catch {}
             const mo = new MutationObserver(sync)
             const rootEl = document.getElementById('root')
-            if (rootEl) mo.observe(rootEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['uri'] })
+            if (rootEl) mo.observe(rootEl, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['uri'] })
             const timer = setInterval(sync, 500)
             window.addEventListener('popstate', sync)
             return () => {
@@ -1350,6 +1530,39 @@ h('div', { className: 'tree-header' },
         React.useEffect(() => {
             initIconInjection()
             installGetFileListTap()
+
+            // 原生列表重新載入（comment、資料夾內容變更）時，同步更新樹狀節點
+            const syncFromNative = () => {
+                const st = HFS.state
+                if (!st || st.loading || !Array.isArray(st.list)) return
+                const cur = canonicalUri(st.uri || '')
+                if (!cur) return
+                try {
+                    if (upsertNodeByList(cur, st.list)) {
+                        window.dispatchEvent(new CustomEvent('tree-nav-tree-updated', {
+                            detail: { uri: cur },
+                        }))
+                    }
+                } catch {}
+            }
+
+            let offEvent = null
+            let offs = []
+            try { offEvent = HFS.onEvent('afterList', syncFromNative) } catch {}
+            try {
+                if (typeof HFS.watchState === 'function') {
+                    ;['loading', 'uri'].forEach(k => {
+                        const off = HFS.watchState(k, syncFromNative, false)
+                        if (typeof off === 'function') offs.push(off)
+                    })
+                }
+            } catch {}
+            syncFromNative()
+
+            return () => {
+                try { if (typeof offEvent === 'function') offEvent() } catch {}
+                offs.forEach(off => { try { off && off() } catch {} })
+            }
         }, [])
 
         const onNavigate = uri => {
@@ -1380,9 +1593,13 @@ h('div', { className: 'tree-header' },
         )
     }
 
+    // 盡早攔截 get_file_list，讓原生頁面與 Tree-nav 共用同一個請求/回應
+    installGetFileListTap()
+
     // 用 portal 把樹狀面板掛到 body：
     // 原本 afterHeader 會把 .hfs-tree-shell 放進 header（z-index:3）的
     // stacking context，裡面的 z-index:100 再高也壓不過 Notes 的 z-index:10，
     // 窄屏時樹的關閉按鈕會被 Notes 面板蓋住而無法點擊。
     HFS.onEvent('afterHeader', () => HFS.React.createPortal(h(TreeShell), document.body))
 }
+

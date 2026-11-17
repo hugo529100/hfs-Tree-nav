@@ -681,7 +681,8 @@ body.tree-resizing .bottom-bar-stack-positioner {
 .tree-root,
 .tree-children,
 .tree-starred-section {
-    min-width: max-content;
+    width: max-content;
+    min-width: 100%;
 }
 
 .tree-node, .tree-root { user-select: none; }
@@ -731,7 +732,7 @@ body.tree-resizing .bottom-bar-stack-positioner {
     display: flex;
     align-items: center;
     gap: 1px;
-    padding: 3px 6px 3px 0;
+    padding: 3px 0;
     cursor: pointer;
     white-space: nowrap;
     border-radius: 3px;
@@ -789,7 +790,6 @@ body.tree-resizing .bottom-bar-stack-positioner {
     color: var(--bg);
     font-weight: 500;
     opacity: 1;
-    width: fit-content;
 }
 
 .tree-row.in-subtree {
@@ -820,13 +820,40 @@ body.tree-resizing .bottom-bar-stack-positioner {
 }
 
 .tree-name {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
     white-space: nowrap;
-    overflow: visible;
-    text-overflow: clip;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding-left: 2px;
     min-width: 0;
-    max-width: none;
+}
+
+/* 資料夾 comment：固定在樹狀滾動區右側（留 4px），浮在檔名之上 */
+.tree-comment {
+    position: sticky;
+    right: 4px;
+    z-index: 3;
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding-left: 6px;
+    max-width: 45%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    text-align: right;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--comment-contrast, var(--faint-contrast));
+    background: transparent;
+    opacity: .85;
+}
+.tree-row:hover .tree-comment {
+    opacity: 1;
+}
+.tree-row.current .tree-comment {
+    color: var(--bg);
+    background: transparent;
+    opacity: .95;
 }
 
 .tree-loading { padding: 10px; color: var(--mild-contrast); }
