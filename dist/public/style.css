@@ -203,40 +203,49 @@ body.tree-resizing .tree-resizer-grip {
     }
     .tree-fab.collapsed:hover {
         width: var(--tree-fab-size-hover);
-        background: var(--tree-fab-bg-hover);
-        color: var(--tree-fab-color);
+        background: var(--text);
+        color: var(--bg);
     }
     .tree-fab.collapsed:hover .tree-fab-line {
-        background: var(--tree-fab-line-color-hover);
+        background: var(--bg);
         opacity: 1;
     }
 }
 
-/* 竖屏：顶部横条 */
+/* 竖屏：顶部中央小横条（对应横屏左侧的小竖条，不再占满整行） */
 @media (orientation: portrait) {
     .tree-fab.collapsed {
-        top: 0;
-        left: 0;
-        right: 0;
+        top: 4px;
+        left: 50%;
+        right: auto;
         bottom: auto;
-        transform: none;
-        width: 100%;
-        height: 14px;
-        border-radius: 0;
+        transform: translateX(-50%);
+        width: 80px;
+        height: var(--tree-fab-size);
+        border-radius: 4px;
         flex-direction: row;
-        background: none;
+        background: var(--tree-fab-bg);
         color: var(--tree-fab-line-color);
     }
+    /* 擴大觸控命中範圍，但視覺仍維持一小段橫線 */
+    .tree-fab.collapsed::before {
+        content: '';
+        position: absolute;
+        inset: -6px -8px;
+        background: transparent;
+    }
     .tree-fab-line {
-        width: 44px;
-        height: 3px;
+        width: 40px;
+        height: 2px;
         border-radius: 2px;
-        background: var(--bg);
-        opacity: .9;
+        background: var(--tree-fab-line-color);
+        opacity: .8;
     }
     .tree-fab.collapsed:hover {
+        height: var(--tree-fab-size-hover);
+        background: var(--text);
         opacity: var(--tree-fab-opacity-hover);
-        color: var(--tree-fab-line-color-hover);
+        color: var(--bg);
     }
     .tree-fab.collapsed:hover .tree-fab-line {
         background: var(--bg);
@@ -266,12 +275,20 @@ body.tree-resizing .tree-resizer-grip {
         position: fixed;
         left: 0; top: 0; bottom: 0;
         width: var(--tree-width);
-        background: var(--bg);
+        min-width: 140px;
+        background: transparent;
         border-right: 1px solid var(--faint-contrast);
         z-index: 90;
         display: flex;
         flex-direction: column;
         font-size: 13px;
+    }
+
+    /* 拖曳時暫時補回不透明底，避免主頁面圖標在透明面板內留下拖影 */
+    body.tree-resizing .hfs-tree-nav,
+    body.note-panel-resizing .hfs-tree-nav {
+        background-color: var(--tree-mask-bg);
+        background-image: linear-gradient(var(--bg), var(--bg));
     }
     /* 右侧内阴影覆盖层（在内容之上） */
     .hfs-tree-nav::after {
@@ -298,42 +315,43 @@ body.tree-resizing .tree-resizer-grip {
     }
 
     body.hfs-tree-layout.hfs-tree-open #mmp-audio {
-        left: var(--tree-width) !important;
-        right: 0 !important;
-        width: auto !important;
+        left: var(--tree-width);
+        right: 0;
+        width: auto;
         transition: left .2s ease;
     }
     body.hfs-tree-layout:not(.hfs-tree-open) #mmp-audio {
-        left: 0 !important;
-        right: 0 !important;
-        width: auto !important;
+        left: 0 ;
+        right: 0 ;
+        width: auto ;
     }
 
     body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.file-show {
-        left: var(--tree-width) !important;
-        right: 0 !important;
-        width: auto !important;
+        /* 留出 1px 給樹的分界線，避免 file-show 蓋住 --text 高亮 */
+        left: calc(var(--tree-width) + 1px);
+        right: 0;
+        width: auto;
         transition: left .2s ease;
     }
     body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.file-show {
-        left: 0 !important;
-        right: 0 !important;
-        width: auto !important;
+        left: 0;
+        right: 0;
+        width: auto;
     }
 
     body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.dv-dialog-fullscreen {
-        left: var(--tree-width) !important;
-        right: 0 !important;
-        width: auto !important;
+        left: calc(var(--tree-width) + 1px);
+        right: 0;
+        width: auto;
         transition: left .2s ease;
     }
     body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.dv-dialog-fullscreen {
-        left: 0 !important;
-        right: 0 !important;
-        width: auto !important;
+        left: 0;
+        right: 0;
+        width: auto;
     }
     body.tree-resizing .dialog-backdrop.dv-dialog-fullscreen {
-        transition: none !important;
+        transition: none;
     }
 
     .tree-resizer {
@@ -346,6 +364,7 @@ body.tree-resizing .tree-resizer-grip {
     .tree-resizer::after {
         top: 0; bottom: 0; right: 0;
         width: 1px;
+        background: var(--faint-contrast);
     }
     .tree-resizer:hover::after,
     body.tree-resizing .tree-resizer::after {
@@ -403,7 +422,9 @@ body.tree-resizing .tree-resizer-grip {
         top: 0; left: 0; right: 0;
         height: var(--tree-mobile-h);
         width: 100%;
-        background: var(--bg);
+        /* 豎屏頂欄補回不透明底：實色 --tree-mask-bg + 半透明 --bg 疊加 */
+        background-color: var(--tree-mask-bg);
+        background-image: linear-gradient(var(--bg), var(--bg));
         border-bottom: 1px solid var(--faint-contrast);
         z-index: 90;
         display: flex;
@@ -433,19 +454,6 @@ body.tree-resizing .tree-resizer-grip {
         to { transform: translateY(0); }
     }
 
-    body.hfs-tree-layout.hfs-tree-open::before {
-        content: '';
-        position: fixed;
-        top: 0; left: 0; right: 0;
-        height: var(--tree-mobile-h);
-        background: var(--tree-mask-bg);
-        z-index: 89;
-        pointer-events: none;
-    }
-    body.hfs-tree-layout:not(.hfs-tree-open)::before {
-        content: none;
-    }
-
     body.hfs-tree-layout.hfs-tree-open > #banner {
         margin-top: var(--tree-mobile-h);
         box-sizing: border-box;
@@ -457,10 +465,10 @@ body.tree-resizing .tree-resizer-grip {
     }
 
     body.hfs-tree-layout.hfs-tree-open header {
-        top: var(--tree-mobile-h) !important;
+        top: var(--tree-mobile-h);
     }
     body.hfs-tree-layout:not(.hfs-tree-open) header {
-        top: 0 !important;
+        top: 0;
     }
 
     body.hfs-tree-layout > #root {
@@ -472,42 +480,42 @@ body.tree-resizing .tree-resizer-grip {
     }
 
     body.hfs-tree-layout #mmp-audio {
-        left: 0 !important;
-        right: 0 !important;
-        width: auto !important;
+        left: 0;
+        right: 0;
+        width: auto ;
     }
 
     body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.file-show {
-        top: var(--tree-mobile-h) !important;
-        bottom: 0 !important;
-        height: auto !important;
+        top: calc(var(--tree-mobile-h) + 1px);
+        bottom: 0;
+        height: auto;
         transition: top .2s ease;
     }
     body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.file-show {
-        top: 0 !important;
-        bottom: 0 !important;
-        height: auto !important;
+        top: 0;
+        bottom: 0;
+        height: auto;
     }
 
     body.hfs-tree-layout.hfs-tree-open .dialog-backdrop.dv-dialog-fullscreen {
-        top: var(--tree-mobile-h) !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: auto !important;
-        height: auto !important;
+        top: calc(var(--tree-mobile-h) + 1px);
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: auto;
+        height: auto;
         transition: top .2s ease;
     }
     body.hfs-tree-layout:not(.hfs-tree-open) .dialog-backdrop.dv-dialog-fullscreen {
-        top: 0 !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        width: auto !important;
-        height: auto !important;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: auto;
+        height: auto;
     }
     body.tree-resizing .dialog-backdrop.dv-dialog-fullscreen {
-        transition: none !important;
+        transition: none;
     }
 
     .hfs-tree-nav .tree-header {
@@ -517,13 +525,18 @@ body.tree-resizing .tree-resizer-grip {
         padding-top: 2px;
     }
 
-    .tree-close {
-        top: auto !important;
+    /* 注意：基礎規則的 .tree-close:focus / :active 會把 top 設回 0，
+       若這裡只寫 .tree-close，按鈕一被聚焦就會跳到頂部、離開游標，
+       導致 pointerup 落在 resizer 上而無法觸發 click。 */
+    .tree-close,
+    .tree-close:focus,
+    .tree-close:active {
+        top: auto;
         bottom: 0;
         right: 0;
         margin-bottom: 1px;
         margin-right: 1px;
-        background: none !important;
+        background: none;
         z-index: 99999;
     }
     .hfs-tree-nav .tree-scroll {
@@ -602,7 +615,7 @@ body.tree-resizing #root,
 body.tree-resizing #mmp-audio,
 body.tree-resizing .dialog-backdrop.file-show,
 body.tree-resizing .bottom-bar-stack-positioner {
-    transition: none !important;
+    transition: none;
 }
 
 /* ============================================================
@@ -849,10 +862,27 @@ body.tree-resizing .bottom-bar-stack-positioner {
 }
 .tree-starred-icon {
     flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 1.2em;
+    height: 1.2em;
+    padding: 0;
+    border: none;
+    background: transparent;
     text-align: center;
+    font-family: inherit;
     font-size: 12px;
+    line-height: 1;
     color: var(--text);
+    cursor: pointer;
+    border-radius: 3px;
+    box-shadow: none;
+    transition: background-color .15s ease, color .15s ease;
+}
+.tree-starred-icon:hover {
+    background: var(--faint-contrast);
+    color: var(--text-high-contrast, var(--text));
 }
 .tree-starred-row.current .tree-starred-icon {
     color: var(--text);
@@ -865,22 +895,6 @@ body.tree-resizing .bottom-bar-stack-positioner {
     min-width: 0;
     max-width: none;
 }
-.tree-starred-remove {
-    flex: 0 0 auto;
-    background: transparent;
-    border: none;
-    color: inherit;
-    opacity: .5;
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-    padding: 0 2px;
-    border-radius: 3px;
-    box-shadow: none;
-}
-.tree-starred-remove:hover {
-    opacity: 1;
-}
 
 /* ============================================================
    ★ 选中行图标反色
@@ -890,7 +904,7 @@ body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon::before,
 body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon::after,
 body.hfs-tree-layout .hfs-tree-nav .tree-row.current .tree-arrow,
 body.hfs-tree-layout .hfs-tree-nav .tree-row.current .tree-star-slot {
-    color: var(--bg) !important;
+    color: var(--bg);
     -webkit-text-fill-color: var(--bg) !important;
     text-fill-color: var(--bg) !important;
     text-shadow: none !important;

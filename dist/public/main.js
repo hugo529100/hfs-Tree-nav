@@ -10,6 +10,7 @@
 
     const DEFAULT_DESK_VW = 20
     const DEFAULT_MOB_VH = 25
+    const MIN_DESK_WIDTH_PX = 140
 
     const { h, React } = HFS
 
@@ -872,17 +873,17 @@ function getRootLabel() {
                     title: it.uri,
                     onClick: () => onNavigate(it.uri),
                 },
-                    h('span', { className: 'tree-starred-icon', 'aria-hidden': 'true' }, STAR_ON),
-                    h('span', { className: 'tree-starred-name' }, it.name),
                     h('button', {
-                        className: 'tree-starred-remove',
-                        title: 'Remove star',
-                        'aria-label': 'Remove star',
+                        type: 'button',
+                        className: 'tree-starred-icon',
+                        title: 'Remove from list',
+                        'aria-label': 'Remove from list',
                         onClick: e => {
                             e.stopPropagation()
                             toggleStar(it.uri, it.name)
                         },
-                    }, '×'),
+                    }, STAR_ON),
+                    h('span', { className: 'tree-starred-name' }, it.name),
                 )
             })
         )
@@ -1123,7 +1124,8 @@ function getRootLabel() {
             } else {
                 const dx2 = e.clientX - d.startX
                 let ww = d.startW + dx2
-                const min = d.vw * 0.10, max = d.vw * 0.60
+                const min = MIN_DESK_WIDTH_PX
+                const max = Math.max(min, d.vw * 0.60)
                 ww = Math.max(min, Math.min(max, ww))
                 d.lastW = ww
                 const vwVal = (ww / d.vw) * 100
@@ -1289,15 +1291,24 @@ h('div', { className: 'tree-header' },
             document.body.classList.toggle('hfs-tree-open', open)
             document.body.classList.add('hfs-tree-layout')
 
-            const vw = tempDeskRatio != null ? tempDeskRatio : DEFAULT_DESK_VW
-            document.body.style.setProperty('--tree-width', vw + 'vw')
-            document.body.style.setProperty('--tree-ratio', String(vw))
+            const applyRatios = () => {
+                const viewportWidth = window.innerWidth || 1
+                const minDeskRatio = (MIN_DESK_WIDTH_PX / viewportWidth) * 100
+                const rawDesk = tempDeskRatio != null ? tempDeskRatio : DEFAULT_DESK_VW
+                const vw = Math.min(60, Math.max(minDeskRatio, rawDesk))
+                document.body.style.setProperty('--tree-width', vw + 'vw')
+                document.body.style.setProperty('--tree-ratio', String(vw))
 
-            const vh = tempMobRatio != null ? tempMobRatio : DEFAULT_MOB_VH
-            document.body.style.setProperty('--tree-mobile-h', vh + 'vh')
+                const vh = tempMobRatio != null ? tempMobRatio : DEFAULT_MOB_VH
+                document.body.style.setProperty('--tree-mobile-h', vh + 'vh')
+            }
+
+            applyRatios()
+            window.addEventListener('resize', applyRatios)
 
             saveOpenState(open)
             return () => {
+                window.removeEventListener('resize', applyRatios)
                 document.body.classList.remove('hfs-tree-open', 'hfs-tree-layout')
             }
         }, [open, tempDeskRatio, tempMobRatio])
@@ -1369,5 +1380,9 @@ h('div', { className: 'tree-header' },
         )
     }
 
-    HFS.onEvent('afterHeader', () => h(TreeShell))
+    // 用 portal 把樹狀面板掛到 body：
+    // 原本 afterHeader 會把 .hfs-tree-shell 放進 header（z-index:3）的
+    // stacking context，裡面的 z-index:100 再高也壓不過 Notes 的 z-index:10，
+    // 窄屏時樹的關閉按鈕會被 Notes 面板蓋住而無法點擊。
+    HFS.onEvent('afterHeader', () => HFS.React.createPortal(h(TreeShell), document.body))
 }
