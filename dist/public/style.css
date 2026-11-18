@@ -271,6 +271,20 @@ body.tree-resizing .tree-resizer-grip {
         transition: padding-left .2s ease;
     }
 
+    /* footer 由 Banner-footer-plugin 直接掛在 body 上（不在 #root 裡），
+       這裡讓它也讓出左側樹狀欄，避免滾到頁面底部時文字壓在樹狀欄底下 */
+    body.hfs-tree-layout.hfs-tree-open > .footer-w3l {
+        /* +1px 讓開樹狀欄右側的 1px 分界線 */
+        margin-left: calc(var(--tree-width) + 1px);
+        width: auto;
+        box-sizing: border-box;
+        transition: margin-left .2s ease;
+    }
+    body.hfs-tree-layout:not(.hfs-tree-open) > .footer-w3l {
+        margin-left: 0;
+        transition: margin-left .2s ease;
+    }
+
     .hfs-tree-nav {
         position: fixed;
         left: 0; top: 0; bottom: 0;
@@ -567,7 +581,6 @@ body.tree-resizing .tree-resizer-grip {
         width: 34px; height: 18px;
         flex-direction: row;
         cursor: row-resize;
-        animation: tree-grip-pulse 2.4s ease-in-out infinite;
     }
     @keyframes tree-grip-pulse {
         0%, 100% { opacity: .7; }
@@ -612,6 +625,7 @@ body.tree-resizing .tree-resizer-grip {
 
 body.tree-resizing #banner,
 body.tree-resizing #root,
+body.tree-resizing .footer-w3l,
 body.tree-resizing #mmp-audio,
 body.tree-resizing .dialog-backdrop.file-show,
 body.tree-resizing .bottom-bar-stack-positioner {
@@ -679,7 +693,13 @@ body.tree-resizing .bottom-bar-stack-positioner {
 }
 
 .tree-root,
-.tree-children,
+.tree-children {
+    /* 不再用 max-content 撐寬：列寬度固定在可見範圍內，
+       檔名才不會伸到 comment 標簽底下 */
+    width: auto;
+    min-width: 0;
+}
+
 .tree-starred-section {
     width: max-content;
     min-width: 100%;
@@ -828,14 +848,12 @@ body.tree-resizing .bottom-bar-stack-positioner {
     min-width: 0;
 }
 
-/* 資料夾 comment：固定在樹狀滾動區右側（留 4px），浮在檔名之上 */
+/* 資料夾 comment：固定在列右側；檔名會自動省略，不會被壓在標簽底下 */
 .tree-comment {
-    position: sticky;
-    right: 4px;
-    z-index: 3;
     flex: 0 0 auto;
     margin-left: auto;
     padding-left: 6px;
+    padding-right: 4px;
     max-width: 45%;
     overflow: hidden;
     white-space: nowrap;

@@ -1,4 +1,4 @@
-﻿"use strict"; {
+"use strict"; {
     const cfg = HFS.getPluginConfig()
     const VISITED_URI_KEY = 'tree-nav-visited-uris-v1'
     const STATE_KEY = 'tree-nav-open-v1'
@@ -949,6 +949,7 @@ function getRootLabel() {
 
         const starredNow = isStarred(node.uri)
         const comment = String(node.comment || '').trim()
+        const nameText = decodeName(node.name)
 
         const onStarClick = e => {
             e.stopPropagation()
@@ -984,7 +985,7 @@ function getRootLabel() {
                     className: 'icon font-icon ' + iconClass,
                     'aria-hidden': 'true',
                 }),
-                h('span', { className: 'tree-name' }, decodeName(node.name)),
+                h('span', { className: 'tree-name', title: nameText }, nameText),
                 comment
                     ? h('span', {
                         className: 'tree-comment',
@@ -1334,7 +1335,7 @@ h('div', { className: 'tree-header' },
                         title: '/',
                     },
                         h('span', { className: 'icon font-icon fa-home', 'aria-hidden': 'true' }),
-                        h('span', { className: 'tree-name' }, tree['/'].name || 'Root'),
+                        h('span', { className: 'tree-name', title: tree['/'].name || 'Root' }, tree['/'].name || 'Root'),
                     ),
                     h('div', { className: 'tree-children' },
                         (tree['/'].children || [])
