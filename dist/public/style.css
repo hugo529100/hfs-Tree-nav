@@ -2,8 +2,8 @@
    Variables
    ============================================================ */
 :root {
-    --tree-width: 20vw;
-    --tree-mobile-h: 25vh;
+    --tree-width: 260px;
+    --tree-mobile-h: 200px;
     --tree-collapsed-w: 4px;
 
     --tree-mask-bg: #ffffff;
@@ -150,105 +150,137 @@ body.tree-resizing .tree-resizer-grip {
 }
 
 /* ============================================================
-   折叠展开按钮 .tree-fab.collapsed —— 基础
-   hint 动画由 main.js 注入并 inline 驱动，这里只给静止外观
+   折叠展开按钮 .tree-fab.collapsed —— 直接做成「小把手」
+   （與 resizer 的小把手同一個造型，hint 動畫由 main.js 注入）
    ============================================================ */
 .tree-fab.collapsed {
     position: fixed;
     z-index: 9999;
     padding: 0;
     border: none;
+    outline: none;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 0;
     box-shadow: none;
-    background: var(--tree-fab-bg);
-    color: var(--tree-fab-color);
-    opacity: var(--tree-fab-opacity);
-    transition: width .15s ease, height .15s ease,
-                opacity .15s ease, background-color .15s ease,
-                color .15s ease;
+    background: transparent;
+    color: var(--faint-contrast);
+    opacity: 1;
+    transition: opacity .15s ease, color .15s ease, border-color .15s ease;
+}
+.tree-fab.collapsed:hover,
+.tree-fab.collapsed:focus,
+.tree-fab.collapsed:focus-visible {
+    outline: none;
 }
 .tree-fab.collapsed .icon { display: none; }
-.tree-fab.collapsed:hover { opacity: var(--tree-fab-opacity-hover); }
 
-/* 细线（真实元素，动画由 JS 控制） */
+/* 把手本體 */
 .tree-fab-line {
-    display: block;
-    border-radius: 1px;
-    background: var(--tree-fab-line-color);
-    opacity: .8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--faint-contrast);
+    border-radius: 4px;
+    opacity: .85;
     pointer-events: none;
 }
+.tree-fab-line::before,
+.tree-fab-line::after {
+    content: '';
+    display: block;
+    width: 0;
+    height: 0;
+    background: transparent;
+    border-radius: 0;
+}
 
-/* 横屏：左侧竖条 */
+/* 横屏：左側小把手（貼螢幕左緣，右側圓角） */
 @media (orientation: landscape) {
     .tree-fab.collapsed {
         top: 50%;
         left: 0;
         right: auto;
+        bottom: auto;
         transform: translateY(-50%);
-        width: var(--tree-fab-size);
-        height: 80px;
-        border-radius: 0 4px 4px 0;
+        width: 10px;
+        height: 30px;
         flex-direction: column;
-        background: var(--tree-fab-bg);
-        color: var(--tree-fab-color);
+        border-radius: 0;
+    }
+    /* 擴大觸控命中範圍（視覺不變） */
+    .tree-fab.collapsed::before {
+        content: '';
+        position: absolute;
+        inset: -8px -10px -8px 0;
+        background: transparent;
     }
     .tree-fab-line {
-        width: 2px;
-        height: 40px;
+        width: 10px;
+        height: 30px;
+        flex-direction: column;
+        border-left: none;
+        border-radius: 0 4px 4px 0;
     }
-    .tree-fab.collapsed:hover {
-        width: var(--tree-fab-size-hover);
-        background: var(--text);
-        color: var(--bg);
+    .tree-fab-line::before {
+        border-top: 3px solid transparent;
+        border-bottom: 3px solid transparent;
+        border-right: 4px solid currentColor;
+    }
+    .tree-fab-line::after {
+        border-top: 3px solid transparent;
+        border-bottom: 3px solid transparent;
+        border-left: 4px solid currentColor;
     }
     .tree-fab.collapsed:hover .tree-fab-line {
-        background: var(--bg);
+        color: var(--text);
         opacity: 1;
+        /* 只高亮箭頭；邊框維持常態，貼邊那兩個直角就不會被高亮成銳角 */
     }
 }
 
-/* 竖屏：顶部中央小横条（对应横屏左侧的小竖条，不再占满整行） */
+/* 竖屏：頂部中央小把手（貼螢幕上緣，下側圓角） */
 @media (orientation: portrait) {
     .tree-fab.collapsed {
-        top: 4px;
+        top: 0;
         left: 50%;
         right: auto;
         bottom: auto;
         transform: translateX(-50%);
-        width: 80px;
-        height: var(--tree-fab-size);
-        border-radius: 4px;
+        width: 24px;
+        height: 9px;
         flex-direction: row;
-        background: var(--tree-fab-bg);
-        color: var(--tree-fab-line-color);
+        border-radius: 0;
     }
-    /* 擴大觸控命中範圍，但視覺仍維持一小段橫線 */
     .tree-fab.collapsed::before {
         content: '';
         position: absolute;
-        inset: -6px -8px;
+        inset: 0 -10px -10px -10px;
         background: transparent;
     }
     .tree-fab-line {
-        width: 40px;
-        height: 2px;
-        border-radius: 2px;
-        background: var(--tree-fab-line-color);
-        opacity: .8;
+        width: 24px;
+        height: 9px;
+        flex-direction: row;
+        border-top: none;
+        border-radius: 0 0 4px 4px;
     }
-    .tree-fab.collapsed:hover {
-        height: var(--tree-fab-size-hover);
-        background: var(--text);
-        opacity: var(--tree-fab-opacity-hover);
-        color: var(--bg);
+    .tree-fab-line::before {
+        border-left: 3px solid transparent;
+        border-right: 3px solid transparent;
+        border-bottom: 4px solid currentColor;
+    }
+    .tree-fab-line::after {
+        border-left: 3px solid transparent;
+        border-right: 3px solid transparent;
+        border-top: 4px solid currentColor;
     }
     .tree-fab.collapsed:hover .tree-fab-line {
-        background: var(--bg);
+        color: var(--text);
         opacity: 1;
     }
 }
@@ -368,28 +400,44 @@ body.tree-resizing .tree-resizer-grip {
         transition: none;
     }
 
+    /* 右側滾動條約 10px 寬，就貼在分界線內側；拖曳區改成分界線「外側」，
+       否則抓滾動條時會先被 resizer 攔截成調整寬度 */
     .tree-resizer {
-        top: 0; right: -4px;
+        top: 0; right: -14px;
         width: 14px; height: 100%;
         cursor: col-resize;
-        margin-right: 3px;
     }
-    .tree-resizer::before { inset: -6px -4px; }
+    .tree-resizer::before { inset: -6px -6px -6px 0; }
     .tree-resizer::after {
-        top: 0; bottom: 0; right: 0;
+        top: 0; bottom: 0; right: 13px;
         width: 1px;
         background: var(--faint-contrast);
     }
     .tree-resizer:hover::after,
     body.tree-resizing .tree-resizer::after {
+        right: 12px;
         width: 2px;
     }
     .tree-resizer-grip {
-        top: 50%; right: 4px;
+        top: 50%; right: 8px;
         transform: translate(50%, -50%);
-        width: 15px; height: 30px;
+        width: 11px; height: 30px;
         flex-direction: column;
         cursor: col-resize;
+        /* 左側貼著分界線：收平左圓角，也不畫左邊框，讓把手直接接上分割線 */
+        border-left: none;
+        border-radius: 0 4px 4px 0;
+    }
+    /* 播放影片/看圖（file-show）時，它的左緣從樹的右邊界開始，會蓋住外側的拖曳
+       把手。此時把把手移到分界線內側（整顆留在樹這一側），仍然可按；viewer 自己
+       的左側控制項不會被蓋住。平時把手在外側，右側滾動條完全不受影響。
+       tree-viewer-open 由 main.js 依目前是否有 file-show 對話框即時切換 */
+    body.hfs-tree-open.tree-viewer-open .tree-resizer-grip {
+        right: 20px;
+        /* 移到內側後是右側貼著分界線：改收平右圓角、去掉右邊框 */
+        border-left: 1px solid var(--faint-contrast);
+        border-right: none;
+        border-radius: 4px 0 0 4px;
     }
     .tree-resizer-grip::before {
         width: 0; height: 0; background: transparent;
@@ -412,12 +460,20 @@ body.tree-resizing .tree-resizer-grip {
     }
     body.tree-resizing { cursor: col-resize; user-select: none; }
 
+    /* 舊快取（main.js 尚未更新、沒有 --depth）時，1–6 層仍維持原本縮排 */
     .tree-node[data-depth="1"] > .tree-row { padding-left: 18px; --line-x: 8px; }
     .tree-node[data-depth="2"] > .tree-row { padding-left: 32px; --line-x: 22px; }
     .tree-node[data-depth="3"] > .tree-row { padding-left: 46px; --line-x: 36px; }
     .tree-node[data-depth="4"] > .tree-row { padding-left: 60px; --line-x: 50px; }
     .tree-node[data-depth="5"] > .tree-row { padding-left: 74px; --line-x: 64px; }
     .tree-node[data-depth="6"] > .tree-row { padding-left: 88px; --line-x: 78px; }
+
+    /* 縮排用深度公式計算：第 7 層以後也延續，不再固定只寫到第 6 層。
+       --depth 由 main.js 依節點深度寫入 row 的 inline style。 */
+    .tree-node > .tree-row {
+        padding-left: calc(18px + (var(--depth, 1) - 1) * 14px);
+        --line-x: calc(8px + (var(--depth, 1) - 1) * 14px);
+    }
 
     .tree-star-slot {
         left: calc(var(--line-x, 10px) - 14px);
@@ -575,24 +631,34 @@ body.tree-resizing .tree-resizer-grip {
         height: 2px; width: auto;
     }
     .tree-resizer-grip {
-        top: auto; bottom: 0;
+        top: 17px; bottom: auto;
         left: 50%; right: auto;
-        transform: translate(-50%, 50%);
-        width: 34px; height: 18px;
+        transform: translate(-50%, 0);
+        /* 展開後是上下兩個箭頭；與收合把手同寬（含邊框 24px） */
+        width: 22px; height: 9px;
         flex-direction: row;
         cursor: row-resize;
+        /* 平常在樹狀欄外側：上緣貼著分界線，收平上圓角、不畫上邊框 */
+        border-top: none;
+        border-radius: 0 0 4px 4px;
     }
-    @keyframes tree-grip-pulse {
-        0%, 100% { opacity: .7; }
-        50%      { opacity: 1; }
+
+    /* 播放影片/看圖（file-show）時，對話框從頂欄下緣開始，會蓋住外側把手；
+       把手移到頂欄內側（下緣貼線），仍然可按，對話框的控制項不被遮住 */
+    body.hfs-tree-open.tree-viewer-open .tree-resizer-grip {
+        top: auto; bottom: 1px;
+        border-top: 1px solid var(--faint-contrast);
+        border-bottom: none;
+        border-radius: 4px 4px 0 0;
     }
+
     .tree-resizer-grip::before {
         width: 0; height: 0; background: transparent;
         border-left: 3px solid transparent;
         border-right: 3px solid transparent;
         border-bottom: 4px solid currentColor;
         border-top: none;
-        border-radius: 0; box-shadow: none;
+        border-radius: 0;
     }
     .tree-resizer-grip::after {
         width: 0; height: 0; background: transparent;
@@ -606,16 +672,23 @@ body.tree-resizing .tree-resizer-grip {
     .tree-resizer:hover .tree-resizer-grip,
     .tree-resizer-grip:hover,
     body.tree-resizing .tree-resizer-grip {
-        transform: translate(-50%, 50%) scale(1.15);
+        transform: translate(-50%, 0) scale(1.15);
     }
     body.tree-resizing { cursor: row-resize; user-select: none; }
 
+    /* 舊快取（main.js 尚未更新、沒有 --depth）時，1–6 層仍維持原本縮排 */
     .tree-node[data-depth="1"] > .tree-row { padding-left: 14px; --line-x: 4px; }
     .tree-node[data-depth="2"] > .tree-row { padding-left: 26px; --line-x: 16px; }
     .tree-node[data-depth="3"] > .tree-row { padding-left: 38px; --line-x: 28px; }
     .tree-node[data-depth="4"] > .tree-row { padding-left: 50px; --line-x: 40px; }
     .tree-node[data-depth="5"] > .tree-row { padding-left: 62px; --line-x: 52px; }
     .tree-node[data-depth="6"] > .tree-row { padding-left: 74px; --line-x: 64px; }
+
+    /* 豎屏：每層 12px，深度公式同橫屏 */
+    .tree-node > .tree-row {
+        padding-left: calc(14px + (var(--depth, 1) - 1) * 12px);
+        --line-x: calc(4px + (var(--depth, 1) - 1) * 12px);
+    }
 
     .tree-star-slot {
         left: calc(var(--line-x, 6px) - 12px);
@@ -793,23 +866,22 @@ body.tree-resizing .bottom-bar-stack-positioner {
     color: var(--text);
 }
 
-.tree-row.current .tree-star-slot {
-    color: var(--bg);
-    opacity: .6;
-}
-.tree-row.current .tree-star-slot.starred {
-    color: var(--bg);
-    opacity: 1;
-}
-.tree-row.current .tree-star-slot:hover {
-    opacity: 1;
-}
-
 .tree-row.current {
-    background: var(--text);
-    color: var(--bg);
+    background: transparent;
+    color: var(--text);
     font-weight: 500;
     opacity: 1;
+}
+.tree-row.current:hover {
+    background: transparent;
+}
+
+/* 只高亮箭頭到檔名，不撐滿整列 */
+.tree-row.current .tree-row-main {
+    background: var(--text);
+    color: var(--bg);
+    border-radius: 3px;
+    padding: 0 4px;
 }
 
 .tree-row.in-subtree {
@@ -848,6 +920,15 @@ body.tree-resizing .bottom-bar-stack-positioner {
     min-width: 0;
 }
 
+/* 箭頭＋圖示＋檔名：current 高亮只包住這一段，comment 留在外面 */
+.tree-row-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
 /* 資料夾 comment：固定在列右側；檔名會自動省略，不會被壓在標簽底下 */
 .tree-comment {
     flex: 0 0 auto;
@@ -867,11 +948,6 @@ body.tree-resizing .bottom-bar-stack-positioner {
 }
 .tree-row:hover .tree-comment {
     opacity: 1;
-}
-.tree-row.current .tree-comment {
-    color: var(--bg);
-    background: transparent;
-    opacity: .95;
 }
 
 .tree-loading { padding: 10px; color: var(--mild-contrast); }
@@ -899,10 +975,25 @@ body.tree-resizing .bottom-bar-stack-positioner {
     background: var(--ghost-contrast);
 }
 .tree-starred-row.current {
-    background: var(--ghost-contrast);
+    background: transparent;
     color: var(--text);
 }
 .tree-starred-row.current:hover {
+    background: transparent;
+}
+.tree-starred-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+.tree-starred-row.current .tree-starred-main {
+    background: var(--ghost-contrast);
+    border-radius: 3px;
+    padding: 0 4px;
+}
+.tree-starred-row.current:hover .tree-starred-main {
     background: var(--faint-contrast);
 }
 .tree-starred-icon {
@@ -941,16 +1032,4 @@ body.tree-resizing .bottom-bar-stack-positioner {
     max-width: none;
 }
 
-/* ============================================================
-   ★ 选中行图标反色
-   ============================================================ */
-body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon,
-body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon::before,
-body.hfs-tree-layout .hfs-tree-nav .tree-row.current .icon.font-icon::after,
-body.hfs-tree-layout .hfs-tree-nav .tree-row.current .tree-arrow,
-body.hfs-tree-layout .hfs-tree-nav .tree-row.current .tree-star-slot {
-    color: var(--bg);
-    -webkit-text-fill-color: var(--bg) !important;
-    text-fill-color: var(--bg) !important;
-    text-shadow: none !important;
-}
+

@@ -1,5 +1,5 @@
 exports.repo = "Hug3O/Tree-nav"
-exports.version = 3.0
+exports.version = 3.2
 exports.description = "Tree navigation sidebar: jump quickly between folders at any depth to cut/copy/move files easily, with starred shortcuts."
 exports.apiRequired = 9.6
 exports.frontend_css = 'style.css'

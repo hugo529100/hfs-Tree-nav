@@ -4,13 +4,16 @@
     const STATE_KEY = 'tree-nav-open-v1'
     const STAR_KEY = 'tree-nav-starred-v1'
     const RATIO_DESK_KEY = 'tree-nav-ratio-desk-v1'
+    const WIDTH_DESK_KEY = 'tree-nav-width-desk-v1'
     const RATIO_MOB_KEY = 'tree-nav-ratio-mob-v1'
+    const HEIGHT_MOB_KEY = 'tree-nav-height-mob-v1'
     const STAR_ON = '\u2605\uFE0E'
     const STAR_OFF = '\u2606\uFE0E'
 
-    const DEFAULT_DESK_VW = 20
-    const DEFAULT_MOB_VH = 25
+    const DEFAULT_DESK_WIDTH_PX = 260
+    const DEFAULT_MOB_HEIGHT_PX = 200
     const MIN_DESK_WIDTH_PX = 140
+    const MIN_MOB_HEIGHT_PX = 80
 
     const { h, React } = HFS
 
@@ -122,16 +125,45 @@ function getRootLabel() {
         try { localStorage.setItem(STATE_KEY, open ? '1' : '0') } catch {}
     }
 
-    function loadRatio(key) {
-        try {
-            const v = parseFloat(localStorage.getItem(key))
-            if (isFinite(v) && v > 0) return v
-        } catch {}
-        return null
-    }
     function saveRatio(key, val) {
         if (!isFinite(val) || val <= 0) return
         try { localStorage.setItem(key, String(val)) } catch {}
+    }
+
+    // Desktop tree width is stored in px (not viewport ratio), so it stays the
+    // same physical width when the page/window proportion changes.
+    function loadDeskWidth() {
+        try {
+            const v = parseFloat(localStorage.getItem(WIDTH_DESK_KEY))
+            if (isFinite(v) && v > 0) return v
+        } catch {}
+        // one-time migration of the old vw ratio
+        try {
+            const old = parseFloat(localStorage.getItem(RATIO_DESK_KEY))
+            if (isFinite(old) && old > 0) {
+                const px = Math.round(old / 100 * (window.innerWidth || 1200))
+                try { localStorage.setItem(WIDTH_DESK_KEY, String(px)) } catch {}
+                return px
+            }
+        } catch {}
+        return DEFAULT_DESK_WIDTH_PX
+    }
+
+    // Portrait top-bar height is stored in px too, for the same reason.
+    function loadMobHeight() {
+        try {
+            const v = parseFloat(localStorage.getItem(HEIGHT_MOB_KEY))
+            if (isFinite(v) && v > 0) return v
+        } catch {}
+        try {
+            const old = parseFloat(localStorage.getItem(RATIO_MOB_KEY))
+            if (isFinite(old) && old > 0) {
+                const px = Math.round(old / 100 * (window.innerHeight || 800))
+                try { localStorage.setItem(HEIGHT_MOB_KEY, String(px)) } catch {}
+                return px
+            }
+        } catch {}
+        return DEFAULT_MOB_HEIGHT_PX
     }
 
     function loadStarred() {
@@ -162,20 +194,55 @@ function getRootLabel() {
             localStorage.setItem(STAR_KEY, JSON.stringify(arr))
         } catch {}
     }
+
+    // 無痕模式 / 隱私設定下 localStorage 可能不可用
+    const STORAGE_OK = (function () {
+        try {
+            const probe = '__tree_nav_probe__'
+            localStorage.setItem(probe, '1')
+            localStorage.removeItem(probe)
+            return true
+        } catch { return false }
+    })()
+
+    function starredSignature(map) {
+        return Array.from(map.entries())
+            .map(([uri, name]) => uri + '\u0001' + name)
+            .sort()
+            .join('\u0002')
+    }
+
+    // 讀回其他分頁寫入的星標；內容有變化才回傳 true
+    function refreshStarredFromStorage() {
+        if (!STORAGE_OK) return false
+        const next = loadStarred()
+        if (starredSignature(next) === starredSignature(starred)) return false
+        starred = next
+        return true
+    }
+
     let starred = loadStarred()
     function isStarred(uri) { return starred.has(canonicalUri(uri)) }
     function toggleStar(uri, name) {
         uri = canonicalUri(uri)
-        if (starred.has(uri)) {
-            starred.delete(uri)
+        // 以畫面上目前看到的狀態決定這次點擊是「加」還是「減」
+        const currentlyStarred = starred.has(uri)
+
+        // ★ 先讀 localStorage 的最新內容再套用本次變更。
+        //   不能用模組載入時的快照整份寫回，否則會蓋掉其他分頁剛加的星標。
+        const next = STORAGE_OK ? loadStarred() : new Map(starred)
+
+        if (currentlyStarred) {
+            next.delete(uri)
         } else {
             let n = name
             if (n == null || n === '') {
                 const parts = uri.split('/').filter(Boolean)
                 n = parts.length ? decodeName(parts[parts.length - 1]) : getRootLabel()
             }
-            starred.set(uri, n)
+            next.set(uri, n)
         }
+        starred = next
         saveStarred(starred)
         try { window.dispatchEvent(new CustomEvent('tree-nav-star-changed')) } catch {}
     }
@@ -215,6 +282,15 @@ function getRootLabel() {
             if (u) return canonicalUri(u)
         }
         return canonicalUri(location.pathname)
+    }
+
+    // 播放影片/看圖（file-show）時，它從樹的右邊界開始，會蓋住分界線外側的拖曳把手。
+    // 用 body class 讓 CSS 把樹的殼層抬到對話框之上，把手才一直可按。
+    function syncViewerOpenClass() {
+        try {
+            const open = !!document.querySelector('.dialog-backdrop.file-show, .dialog-backdrop.dv-dialog-fullscreen')
+            document.body.classList.toggle('tree-viewer-open', open)
+        } catch {}
     }
 
     function getSortConfig() {
@@ -503,10 +579,103 @@ function getRootLabel() {
         })
     }
 
+    // ---- List-cache（frozen list mode）---------------------------------------------------
+    // 超大資料夾被 List-cache 凍結後，原生頁面一次只載入一頁（HFS.state.list 只有已載入
+    // 的那幾頁），直接拿它建樹會少掉後面的資料夾。此時改用 Tree-nav 自己的 get_file_list
+    // 向後端要完整清單：List-cache 對非 SSE 請求會回整份 frozen listing。
+    const LC_META_TTL = 30 * 1000
+    const lcMetaCache = new Map()  // uri -> { at, frozen }
+    const frozenUris = new Set()   // 已確認 frozen 的分支：不讓原生分頁清單覆蓋
+    const frozenStats = new Map()  // uri -> { folders, files }：凍結清單的真實數量
+
+    function listCacheAvailable() {
+        try {
+            if (HFS.plugins && HFS.plugins['List-cache']) return true
+        } catch {}
+        try {
+            return !!document.querySelector('script[plugin="List-cache"]')
+        } catch { return false }
+    }
+
+    async function isFrozenFolder(uri) {
+        if (!listCacheAvailable() || typeof HFS.customRestCall !== 'function') return false
+        const now = Date.now()
+        const hit = lcMetaCache.get(uri)
+        if (hit && now - hit.at < LC_META_TTL) return hit.frozen
+        let frozen = false
+        try {
+            const res = await HFS.customRestCall('lc_meta', { uri })
+            frozen = Boolean(res && res.frozen && Number(res.pages) > 1 && Number(res.count) > 0)
+        } catch {}
+        lcMetaCache.set(uri, { at: now, frozen })
+        return frozen
+    }
+
+    async function fetchFullList(uri) {
+        const url = '/~/api/get_file_list?uri=' + encodeURIComponent(uri)
+        // 走原始 fetch：不讓 installGetFileListTap 把這份完整清單分享給原生頁面，
+        // 否則會破壞 List-cache 的分頁載入
+        const f = origFetchRef.current || window.fetch.bind(window)
+        const r = await f(url, { credentials: 'same-origin' })
+        if (!r.ok) throw new Error('get_file_list failed ' + r.status)
+        const data = await r.json()
+        if (!data || !Array.isArray(data.list)) throw new Error('bad listing')
+        return data.list
+    }
+
+    function summarizeFrozenList(list) {
+        let folders = 0
+        let files = 0
+        let bytes = 0
+        for (const x of list) {
+            if (!x || typeof x.n !== 'string') continue
+            if (x.isFolder === true || x.n.endsWith('/')) folders++
+            else {
+                files++
+                bytes += Number(x.s) || 0
+            }
+        }
+        return { folders, files, bytes }
+    }
+
+    function formatByteSize(bytes) {
+        const unit = Number(HFS.kb) > 0 ? Number(HFS.kb) : 1000
+        const n = Number(bytes) || 0
+        if (n < unit) return n + ' B'
+        const units = ['KB', 'MB', 'GB', 'TB']
+        let v = n / unit
+        let i = 0
+        while (v >= unit && i < units.length - 1) {
+            v /= unit
+            i++
+        }
+        return (v >= 100 ? Math.round(v) : v.toFixed(1)) + ' ' + units[i]
+    }
+
+    function frozenFolderStats(uri) {
+        return frozenStats.get(canonicalUri(uri)) || null
+    }
+
     async function fetchDirs(uri) {
         uri = canonicalUri(uri)
         const nativeList = await waitForNativeList(uri)
-        if (nativeList !== null) return buildDirsFromList(uri, nativeList)
+        if (nativeList !== null) {
+            // 只有「目前頁面」會走到這裡；凍結資料夾的原生 list 只含已載入的幾頁，
+            // 改向後端要完整清單（非目前頁面的資料夾本來就會自己 fetch，不受影響）
+            if (await isFrozenFolder(uri)) {
+                frozenUris.add(uri)
+                try {
+                    const full = await fetchFullList(uri)
+                    if (full) {
+                        frozenStats.set(uri, summarizeFrozenList(full))
+                        return buildDirsFromList(uri, full)
+                    }
+                } catch (e) {
+                    console.warn('[Tree-nav] frozen folder full list failed', uri, e)
+                }
+            }
+            return buildDirsFromList(uri, nativeList)
+        }
         const url = '/~/api/get_file_list?uri=' + encodeURIComponent(uri)
         const r = await fetch(url, { credentials: 'same-origin' })
         if (!r.ok) throw new Error('get_file_list failed ' + r.status)
@@ -567,6 +736,9 @@ function getRootLabel() {
 
     function upsertNodeByList(uri, list) {
         uri = canonicalUri(uri)
+        // frozen 分支的完整資料夾清單由 fetchDirs 取得；原生頁面只有分頁資料，
+        // 不能拿來覆蓋（否則後面的資料夾會被裁掉）
+        if (frozenUris.has(uri)) return false
 
         if (uri === '/') {
             const root = ensureRootNode()
@@ -871,19 +1043,12 @@ function getRootLabel() {
     75%  { opacity: 1;  }
     100% { opacity: .9; }
 }
-@keyframes tree-nav-hint-line-desk {
-    0%   { width: 2px;  background-color: var(--faint-contrast); opacity: .8; box-shadow: none; }
-    25%  { width: 4px;  background-color: var(--text);           opacity: 1;  box-shadow: 0 0 6px var(--text); }
-    50%  { width: 2px;  background-color: var(--faint-contrast); opacity: .8; box-shadow: none; }
-    75%  { width: 4px;  background-color: var(--text);           opacity: 1;  box-shadow: 0 0 6px var(--text); }
-    100% { width: 2px;  background-color: var(--faint-contrast); opacity: .8; box-shadow: none; }
-}
-@keyframes tree-nav-hint-line-mob {
-    0%   { width: 44px; background-color: var(--bg);   opacity: .9; box-shadow: none; }
-    25%  { width: 72px; background-color: var(--text); opacity: 1;  box-shadow: 0 0 8px var(--text); }
-    50%  { width: 44px; background-color: var(--bg);   opacity: .9; box-shadow: none; }
-    75%  { width: 72px; background-color: var(--text); opacity: 1;  box-shadow: 0 0 8px var(--text); }
-    100% { width: 44px; background-color: var(--bg);   opacity: .9; box-shadow: none; }
+@keyframes tree-nav-hint-handle {
+    0%   { color: var(--faint-contrast); opacity: .85; box-shadow: none; }
+    25%  { color: var(--text);           opacity: 1;   box-shadow: 0 0 8px var(--text); }
+    50%  { color: var(--faint-contrast); opacity: .85; box-shadow: none; }
+    75%  { color: var(--text);           opacity: 1;   box-shadow: 0 0 8px var(--text); }
+    100% { color: var(--faint-contrast); opacity: .85; box-shadow: none; }
 }
 `
         document.head.appendChild(style)
@@ -965,6 +1130,8 @@ function getRootLabel() {
                 className: rowClass,
                 onClick: () => onNavigate(node.uri),
                 title: node.uri,
+                // 供 CSS 以深度公式計算縮排／樹枝線位置（第 7 層以後也適用）
+                style: { '--depth': depth },
             },
                 depth > 1
                     ? h('span', {
@@ -975,17 +1142,19 @@ function getRootLabel() {
                         onClick: onStarClick,
                     }, starredNow ? STAR_ON : STAR_OFF)
                     : null,
-                h('span', {
-                    className: 'tree-arrow' + (open ? ' open' : ''),
-                    onClick: toggle,
-                    role: 'button',
-                    'aria-label': open ? 'Collapse' : 'Expand',
-                }, loading ? '…' : (open ? '▾' : '▸')),
-                h('span', {
-                    className: 'icon font-icon ' + iconClass,
-                    'aria-hidden': 'true',
-                }),
-                h('span', { className: 'tree-name', title: nameText }, nameText),
+                h('span', { className: 'tree-row-main' }, [
+                    h('span', {
+                        className: 'tree-arrow' + (open ? ' open' : ''),
+                        onClick: toggle,
+                        role: 'button',
+                        'aria-label': open ? 'Collapse' : 'Expand',
+                    }, loading ? '…' : (open ? '▾' : '▸')),
+                    h('span', {
+                        className: 'icon font-icon ' + iconClass,
+                        'aria-hidden': 'true',
+                    }),
+                    h('span', { className: 'tree-name', title: nameText }, nameText),
+                ]),
                 comment
                     ? h('span', {
                         className: 'tree-comment',
@@ -1022,17 +1191,19 @@ function getRootLabel() {
                     title: it.uri,
                     onClick: () => onNavigate(it.uri),
                 },
-                    h('button', {
-                        type: 'button',
-                        className: 'tree-starred-icon',
-                        title: 'Remove from list',
-                        'aria-label': 'Remove from list',
-                        onClick: e => {
-                            e.stopPropagation()
-                            toggleStar(it.uri, it.name)
-                        },
-                    }, STAR_ON),
-                    h('span', { className: 'tree-starred-name' }, it.name),
+                    h('span', { className: 'tree-starred-main' }, [
+                        h('button', {
+                            type: 'button',
+                            className: 'tree-starred-icon',
+                            title: 'Remove from list',
+                            'aria-label': 'Remove from list',
+                            onClick: e => {
+                                e.stopPropagation()
+                                toggleStar(it.uri, it.name)
+                            },
+                        }, STAR_ON),
+                        h('span', { className: 'tree-starred-name' }, it.name),
+                    ]),
                 )
             })
         )
@@ -1048,6 +1219,16 @@ function getRootLabel() {
 
         function readFolderStats() {
             try {
+                // frozen 資料夾的原生 #folder-stats 只算「已載入那一頁」，會顯示成
+                // 50 folders 之類的錯誤數字；改用完整清單算出的真實數量
+                const frozen = frozenFolderStats(readCurrentUri())
+                if (frozen) {
+                    const parts = []
+                    if (frozen.files > 0) parts.push(frozen.files + (frozen.files === 1 ? ' file' : ' files'))
+                    if (frozen.folders > 0) parts.push(frozen.folders + (frozen.folders === 1 ? ' folder' : ' folders'))
+                    if (parts.length) parts.push(formatByteSize(frozen.bytes))
+                    return parts.length ? parts.join(', ') : 'empty'
+                }
                 const el = document.querySelector('#folder-stats')
                 if (!el) return ''
                 return (el.textContent || '').trim()
@@ -1056,8 +1237,32 @@ function getRootLabel() {
 
         React.useEffect(() => {
             const onStarChange = () => setStarVersion(v => v + 1)
+
+            // 其他分頁增刪星標時同步（storage 事件只在「別的分頁」觸發）
+            const onStorage = e => {
+                if (e && e.key && e.key !== STAR_KEY) return
+                if (refreshStarredFromStorage()) setStarVersion(v => v + 1)
+            }
+            // 分頁被凍結/從 bfcache 回來時，storage 事件可能漏掉，再對一次
+            const onVisible = () => {
+                if (document.visibilityState !== 'visible') return
+                if (refreshStarredFromStorage()) setStarVersion(v => v + 1)
+            }
+
             window.addEventListener('tree-nav-star-changed', onStarChange)
-            return () => window.removeEventListener('tree-nav-star-changed', onStarChange)
+            window.addEventListener('storage', onStorage)
+            window.addEventListener('focus', onVisible)
+            document.addEventListener('visibilitychange', onVisible)
+
+            // 側欄是關掉再開的，掛載時也先跟 localStorage 對一次
+            if (refreshStarredFromStorage()) setStarVersion(v => v + 1)
+
+            return () => {
+                window.removeEventListener('tree-nav-star-changed', onStarChange)
+                window.removeEventListener('storage', onStorage)
+                window.removeEventListener('focus', onVisible)
+                document.removeEventListener('visibilitychange', onVisible)
+            }
         }, [])
 
         React.useEffect(() => {
@@ -1265,11 +1470,12 @@ function getRootLabel() {
             if (d.isMobile) {
                 const dy2 = e.clientY - d.startY
                 let hh = d.startW + dy2
-                const min = d.vh * 0.10, max = d.vh * 0.70
+                const min = MIN_MOB_HEIGHT_PX
+                const max = Math.max(min, d.vh * 0.70)
                 hh = Math.max(min, Math.min(max, hh))
                 d.lastW = hh
-                const vhVal = (hh / d.vh) * 100
-                document.body.style.setProperty('--tree-mobile-h', vhVal + 'vh')
+                // px, not vh: resizing the window must not scale the top-bar height
+                document.body.style.setProperty('--tree-mobile-h', hh + 'px')
             } else {
                 const dx2 = e.clientX - d.startX
                 let ww = d.startW + dx2
@@ -1277,8 +1483,8 @@ function getRootLabel() {
                 const max = Math.max(min, d.vw * 0.60)
                 ww = Math.max(min, Math.min(max, ww))
                 d.lastW = ww
-                const vwVal = (ww / d.vw) * 100
-                document.body.style.setProperty('--tree-width', vwVal + 'vw')
+                // px, not vw: resizing the window must not scale the tree width
+                document.body.style.setProperty('--tree-width', ww + 'px')
             }
         }
 
@@ -1290,9 +1496,9 @@ function getRootLabel() {
             document.body.classList.remove('tree-resizing')
             if (!d.moved) return
             if (d.isMobile) {
-                onResize && onResize('mob', (d.lastW / d.vh) * 100)
+                onResize && onResize('mob', d.lastW)
             } else {
-                onResize && onResize('desk', (d.lastW / d.vw) * 100)
+                onResize && onResize('desk', d.lastW)
             }
         }
 
@@ -1334,8 +1540,10 @@ h('div', { className: 'tree-header' },
                         onClick: () => onNavigate('/'),
                         title: '/',
                     },
-                        h('span', { className: 'icon font-icon fa-home', 'aria-hidden': 'true' }),
-                        h('span', { className: 'tree-name', title: tree['/'].name || 'Root' }, tree['/'].name || 'Root'),
+                        h('span', { className: 'tree-row-main' }, [
+                            h('span', { className: 'icon font-icon fa-home', 'aria-hidden': 'true' }),
+                            h('span', { className: 'tree-name', title: tree['/'].name || 'Root' }, tree['/'].name || 'Root'),
+                        ]),
                     ),
                     h('div', { className: 'tree-children' },
                         (tree['/'].children || [])
@@ -1381,8 +1589,6 @@ h('div', { className: 'tree-header' },
             const line = lineRef.current
             if (!el || !line) return
 
-            const isLandscape = window.matchMedia('(orientation: landscape)').matches
-
             let raf1 = 0, raf2 = 0, t = 0
             raf1 = requestAnimationFrame(() => {
                 raf2 = requestAnimationFrame(() => {
@@ -1390,15 +1596,11 @@ h('div', { className: 'tree-header' },
 
                     el.style.animation = 'none'
                     void el.offsetWidth
-                    el.style.animation = isLandscape
-                        ? 'tree-nav-hint-btn-desk 1.6s ease-in-out 1 both'
-                        : 'tree-nav-hint-btn-mob 1.6s ease-in-out 1 both'
+                    el.style.animation = 'tree-nav-hint-btn 1.6s ease-in-out 1 both'
 
                     line.style.animation = 'none'
                     void line.offsetWidth
-                    line.style.animation = isLandscape
-                        ? 'tree-nav-hint-line-desk 1.6s ease-in-out 1 both'
-                        : 'tree-nav-hint-line-mob 1.6s ease-in-out 1 both'
+                    line.style.animation = 'tree-nav-hint-handle 1.6s ease-in-out 1 both'
 
                     t = setTimeout(() => {
                         if (!el.isConnected || !line.isConnected) return
@@ -1433,8 +1635,8 @@ h('div', { className: 'tree-header' },
         const [open, setOpen] = React.useState(() => loadOpenState())
         const [currentUri, setCurrentUri] = React.useState(() => readCurrentUri())
         const [sortSig, setSortSig] = React.useState(() => sortKey())
-        const [tempDeskRatio, setTempDeskRatio] = React.useState(() => loadRatio(RATIO_DESK_KEY))
-        const [tempMobRatio, setTempMobRatio] = React.useState(() => loadRatio(RATIO_MOB_KEY))
+        const [tempDeskWidth, setTempDeskWidth] = React.useState(loadDeskWidth)
+        const [tempMobHeight, setTempMobHeight] = React.useState(loadMobHeight)
 
         React.useEffect(() => {
             document.body.classList.toggle('hfs-tree-open', open)
@@ -1442,14 +1644,15 @@ h('div', { className: 'tree-header' },
 
             const applyRatios = () => {
                 const viewportWidth = window.innerWidth || 1
-                const minDeskRatio = (MIN_DESK_WIDTH_PX / viewportWidth) * 100
-                const rawDesk = tempDeskRatio != null ? tempDeskRatio : DEFAULT_DESK_VW
-                const vw = Math.min(60, Math.max(minDeskRatio, rawDesk))
-                document.body.style.setProperty('--tree-width', vw + 'vw')
-                document.body.style.setProperty('--tree-ratio', String(vw))
+                const maxDesk = Math.max(MIN_DESK_WIDTH_PX, viewportWidth * 0.60)
+                const deskPx = Math.min(maxDesk, Math.max(MIN_DESK_WIDTH_PX, tempDeskWidth))
+                document.body.style.setProperty('--tree-width', deskPx + 'px')
+                document.body.style.setProperty('--tree-ratio', String((deskPx / viewportWidth) * 100))
 
-                const vh = tempMobRatio != null ? tempMobRatio : DEFAULT_MOB_VH
-                document.body.style.setProperty('--tree-mobile-h', vh + 'vh')
+                const viewportHeight = window.innerHeight || 1
+                const maxMob = Math.max(MIN_MOB_HEIGHT_PX, viewportHeight * 0.70)
+                const mobPx = Math.min(maxMob, Math.max(MIN_MOB_HEIGHT_PX, tempMobHeight))
+                document.body.style.setProperty('--tree-mobile-h', mobPx + 'px')
             }
 
             applyRatios()
@@ -1460,7 +1663,7 @@ h('div', { className: 'tree-header' },
                 window.removeEventListener('resize', applyRatios)
                 document.body.classList.remove('hfs-tree-open', 'hfs-tree-layout')
             }
-        }, [open, tempDeskRatio, tempMobRatio])
+        }, [open, tempDeskWidth, tempMobHeight])
 
         React.useEffect(() => {
             let lastUri = readCurrentUri()
@@ -1503,6 +1706,7 @@ h('div', { className: 'tree-header' },
                 if (s !== lastSort) { lastSort = s; setSortSig(s) }
                 syncNativeList()
                 rebuildIconMap()
+                syncViewerOpenClass()
             }
             let offs = []
             try {
@@ -1520,11 +1724,20 @@ h('div', { className: 'tree-header' },
             if (rootEl) mo.observe(rootEl, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['uri'] })
             const timer = setInterval(sync, 500)
             window.addEventListener('popstate', sync)
+            syncViewerOpenClass()
+            // 對話框是直接掛在 body 上的，插入/移除時立刻切換，不必等 500ms 的 timer
+            let viewerObserver = null
+            try {
+                viewerObserver = new MutationObserver(syncViewerOpenClass)
+                viewerObserver.observe(document.body, { childList: true })
+            } catch {}
             return () => {
                 offs.forEach(f => { try { f() } catch {} })
                 mo.disconnect()
                 clearInterval(timer)
                 window.removeEventListener('popstate', sync)
+                try { viewerObserver && viewerObserver.disconnect() } catch {}
+                document.body.classList.remove('tree-viewer-open')
             }
         }, [])
 
@@ -1580,11 +1793,11 @@ h('div', { className: 'tree-header' },
         const onResize = (kind, val) => {
             if (!isFinite(val) || val <= 0) return
             if (kind === 'desk') {
-                setTempDeskRatio(val)
-                saveRatio(RATIO_DESK_KEY, val)
+                setTempDeskWidth(val)
+                saveRatio(WIDTH_DESK_KEY, Math.round(val))
             } else {
-                setTempMobRatio(val)
-                saveRatio(RATIO_MOB_KEY, val)
+                setTempMobHeight(val)
+                saveRatio(HEIGHT_MOB_KEY, Math.round(val))
             }
         }
 
