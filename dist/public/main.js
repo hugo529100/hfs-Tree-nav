@@ -284,6 +284,90 @@ function getRootLabel() {
         return canonicalUri(location.pathname)
     }
 
+    function parentFolderUri(uri) {
+        const parts = canonicalUri(uri).split('/').filter(Boolean)
+        if (!parts.length) return null
+        parts.pop()
+        return '/' + parts.join('/') + (parts.length ? '/' : '')
+    }
+
+    function updateTreeComment(node, uri, comment) {
+        if (!node) return node
+        if (canonicalUri(node.uri) === canonicalUri(uri)) {
+            return node.comment === comment ? node : { ...node, comment }
+        }
+        let changed = false
+        const children = (node.children || []).map(c => {
+            const next = updateTreeComment(c, uri, comment)
+            if (next !== c) changed = true
+            return next
+        })
+        return changed ? { ...node, children } : node
+    }
+
+    // Immediate DOM fallback: HFS may re-sync its list right after the comment API
+    // and recreate the tree node before React commits, so update the visible tag too.
+    function updateTreeCommentDom(uri, comment) {
+        try {
+            const target = canonicalUri(uri)
+            const row = Array.from(document.querySelectorAll('.tree-row')).find(r =>
+                canonicalUri(r.getAttribute('title') || '') === target
+            )
+            if (!row) return
+            let el = row.querySelector('.tree-comment')
+            const text = String(comment || '').trim()
+            if (!text) {
+                if (el) el.remove()
+                return
+            }
+            if (!el) {
+                el = document.createElement('span')
+                el.className = 'tree-comment'
+                row.appendChild(el)
+            }
+            el.textContent = text
+            el.title = text
+        } catch {}
+    }
+
+    // Keep HFS's own comment UI in sync too: the current folder's header uses
+    // state.props.comment, while a child row in the list uses its entry.comment.
+    function applyHfsComment(uri, comment) {
+        try {
+            const target = canonicalUri(uri)
+            const current = readCurrentUri()
+            if (target === current) {
+                if (HFS.state && HFS.state.props) HFS.state.props.comment = comment
+                return
+            }
+            const list = HFS.state && Array.isArray(HFS.state.list) ? HFS.state.list : []
+            const entry = list.find(x => {
+                if (!x || !x.n) return false
+                try { return canonicalUri(current + String(x.n)) === target } catch { return false }
+            })
+            if (entry) entry.comment = comment
+        } catch {}
+    }
+
+    async function openCommentPrompt(node, onSync) {
+        try {
+            if (!HFS.dialogLib || typeof HFS.dialogLib.promptDialog !== 'function') return
+            if (typeof HFS.apiCall !== 'function') return
+            const value = await HFS.dialogLib.promptDialog(
+                'Comment for ' + (node.name || ''),
+                { value: String(node.comment || ''), type: 'textarea' }
+            )
+            if (value === undefined) return
+            const comment = String(value)
+            await HFS.apiCall('comment', { uri: node.uri, comment })
+            applyHfsComment(node.uri, comment)
+            if (typeof onSync === 'function') onSync(node.uri, comment)
+        } catch (e) {
+            try { HFS.dialogLib.alertDialog(String(e), 'error') } catch {}
+        }
+    }
+
+
     // 播放影片/看圖（file-show）時，它從樹的右邊界開始，會蓋住分界線外側的拖曳把手。
     // 用 body class 讓 CSS 把樹的殼層抬到對話框之上，把手才一直可按。
     function syncViewerOpenClass() {
@@ -1054,9 +1138,11 @@ function getRootLabel() {
         document.head.appendChild(style)
     }
 
-    function TreeNode({ node, depth, currentUri, onNavigate, inSelectedSubtree, starVersion }) {
-        const isCurrent = currentUri === node.uri
-        const isOnPath = currentUri !== '/' && (currentUri === node.uri || currentUri.startsWith(node.uri))
+    function TreeNode({ node, depth, currentUri, onNavigate, inSelectedSubtree, starVersion, onCommentSync }) {
+        const currentCanonical = canonicalUri(currentUri)
+        const nodeCanonical = canonicalUri(node.uri)
+        const isCurrent = currentCanonical === nodeCanonical
+        const isOnPath = currentCanonical !== '/' && (isCurrent || currentCanonical.startsWith(nodeCanonical))
         const [open, setOpen] = React.useState(isOnPath)
         const [children, setChildren] = React.useState(() => node.children || [])
         const [loading, setLoading] = React.useState(false)
@@ -1122,6 +1208,16 @@ function getRootLabel() {
             toggleStar(node.uri, node.name)
         }
 
+        // 右鍵：直接編輯這個目錄的 comment
+        const onRowContextMenu = e => {
+            e.preventDefault()
+            e.stopPropagation()
+            openCommentPrompt(
+                { uri: node.uri, name: node.name, comment: node.comment },
+                onCommentSync
+            )
+        }
+
         return h('div', {
             className: 'tree-node' + (inSubtree ? ' in-subtree-node' : ''),
             'data-depth': depth
@@ -1129,6 +1225,7 @@ function getRootLabel() {
             h('div', {
                 className: rowClass,
                 onClick: () => onNavigate(node.uri),
+                onContextMenu: onRowContextMenu,
                 title: node.uri,
                 // 供 CSS 以深度公式計算縮排／樹枝線位置（第 7 層以後也適用）
                 style: { '--depth': depth },
@@ -1168,6 +1265,7 @@ function getRootLabel() {
                     currentUri, onNavigate,
                     inSelectedSubtree: childInSubtree,
                     starVersion,
+                    onCommentSync,
                 }))
             ),
         )
@@ -1216,6 +1314,11 @@ function getRootLabel() {
         const [folderStats, setFolderStats] = React.useState(() => readFolderStats())
         const scrollRef = React.useRef(null)
         const bootRef = React.useRef(false)
+
+        const updateComment = (uri, comment) => {
+            setTree(prev => updateTreeComment(prev, uri, comment))
+            updateTreeCommentDom(uri, comment)
+        }
 
         function readFolderStats() {
             try {
@@ -1553,6 +1656,7 @@ h('div', { className: 'tree-header' },
                                 currentUri, onNavigate,
                                 inSelectedSubtree: currentUri === '/',
                                 starVersion,
+                                onCommentSync: updateComment,
                             }))
                     )
                 )
@@ -1814,6 +1918,45 @@ h('div', { className: 'tree-header' },
     // 原本 afterHeader 會把 .hfs-tree-shell 放進 header（z-index:3）的
     // stacking context，裡面的 z-index:100 再高也壓不過 Notes 的 z-index:10，
     // 窄屏時樹的關閉按鈕會被 Notes 面板蓋住而無法點擊。
+    // The current folder's native Folder menu has no Delete entry (the folder is the
+    // page itself). Add one so deleting a tree folder via its Folder menu also moves
+    // the right-hand view to the parent instead of leaving a 404.
+    // HFS builds both entry and current-folder menus through the fileMenu event.
+    const addCurrentFolderDelete = ({ entry, menu }) => {
+        try {
+            if (!entry || !entry.isFolder) return
+            const current = readCurrentUri()
+            if (current === '/' || canonicalUri(entry.uri) !== current) return
+            if (Array.isArray(menu) && menu.some(x => x && x.id === 'delete')) return
+            return {
+                id: 'delete',
+                icon: 'delete',
+                label: typeof HFS.t === 'function' ? HFS.t('Delete') : 'Delete',
+                onClick: async () => {
+                    let ok = false
+                    try {
+                        ok = await HFS.dialogLib.confirmDialog(
+                            'Delete',
+                            'Delete "' + entry.name + '" and all its contents? This cannot be undone.'
+                        )
+                    } catch {}
+                    if (!ok) return false
+                    try {
+                        await HFS.apiCall('delete', {}, { restUri: entry.uri })
+                        const parent = parentFolderUri(entry.uri)
+                        if (parent && typeof HFS.navigate === 'function') HFS.navigate(parent)
+                        else if (parent) location.href = parent
+                        else if (typeof HFS.reloadList === 'function') HFS.reloadList()
+                    } catch (e) {
+                        try { HFS.dialogLib.alertDialog(String(e), 'error') } catch {}
+                    }
+                },
+            }
+        } catch {}
+    }
+    HFS.onEvent('fileMenu', addCurrentFolderDelete)
+    HFS.onEvent('folderMenu', addCurrentFolderDelete)
+
     HFS.onEvent('afterHeader', () => HFS.React.createPortal(h(TreeShell), document.body))
 }
 
