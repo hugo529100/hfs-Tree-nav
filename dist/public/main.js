@@ -166,32 +166,56 @@ function getRootLabel() {
         return DEFAULT_MOB_HEIGHT_PX
     }
 
-    function loadStarred() {
+    const STAR_TTL = 7 * 24 * 60 * 60 * 1000
+
+    function starLabel(uri, name) {
+        // The path is authoritative; a legacy locale-mangled display name must
+        // not leak into the account library or the starred list.
+        const canonical = canonicalUri(uri)
+        const parts = canonical.split('/').filter(Boolean)
+        return parts.length ? decodeName(parts[parts.length - 1]) : getRootLabel()
+    }
+
+    // Guests: localStorage, one timestamp per star, pruned after 7 days.
+    function loadGuestStarred() {
         try {
-            const raw = JSON.parse(localStorage.getItem(STAR_KEY) || '[]')
+            const raw = JSON.parse(localStorage.getItem(STAR_KEY) || 'null')
             const map = new Map()
             if (Array.isArray(raw)) {
+                // legacy array without timestamps: start the 7-day window now
                 for (const item of raw) {
-                    if (item && typeof item === 'object' && typeof item.uri === 'string') {
-                        const uri = canonicalUri(item.uri)
-                        const name = typeof item.name === 'string' && item.name
-                            ? item.name
-                            : (function () {
-                                const parts = uri.split('/').filter(Boolean)
-                                return parts.length ? decodeName(parts[parts.length - 1]) : getRootLabel()
-                            })()
-                        map.set(uri, name)
-                    }
+                    if (!item || typeof item !== 'object' || typeof item.uri !== 'string') continue
+                    const uri = canonicalUri(item.uri)
+                    map.set(uri, { name: starLabel(uri, item.name), at: Date.now() })
                 }
+                saveGuestStarred(map)
+                return map
+            }
+            if (raw && Array.isArray(raw.stars)) {
+                const now = Date.now()
+                let changed = false
+                for (const item of raw.stars) {
+                    if (!item || typeof item.uri !== 'string') continue
+                    const uri = canonicalUri(item.uri)
+                    const at = Number(item.at) || 0
+                    if (!at || now - at > STAR_TTL) { changed = true; continue }
+                    map.set(uri, { name: starLabel(uri, item.name), at })
+                }
+                if (changed) saveGuestStarred(map)
             }
             return map
         } catch {}
         return new Map()
     }
-    function saveStarred(map) {
+
+    function saveGuestStarred(map) {
         try {
-            const arr = Array.from(map.entries()).map(([uri, name]) => ({ uri, name }))
-            localStorage.setItem(STAR_KEY, JSON.stringify(arr))
+            const stars = Array.from(map.entries()).map(([uri, value]) => ({
+                uri,
+                name: starLabel(uri, value && value.name),
+                at: (value && value.at) || Date.now(),
+            }))
+            localStorage.setItem(STAR_KEY, JSON.stringify({ v: 2, at: Date.now(), stars }))
         } catch {}
     }
 
@@ -207,45 +231,170 @@ function getRootLabel() {
 
     function starredSignature(map) {
         return Array.from(map.entries())
-            .map(([uri, name]) => uri + '\u0001' + name)
-            .sort()
+            .map(([uri, value]) => uri + '\u0001' + ((value && value.name) || '') + '\u0001' + ((value && value.at) || ''))
             .join('\u0002')
     }
 
-    // 讀回其他分頁寫入的星標；內容有變化才回傳 true
+    function currentUsername() {
+        try { return String((HFS.state && HFS.state.username) || '') } catch { return '' }
+    }
+
+    function serverStarsToMap(list) {
+        const map = new Map()
+        for (const item of Array.isArray(list) ? list : []) {
+            if (!item || typeof item.path !== 'string') continue
+            const uri = canonicalUri(item.path)
+            map.set(uri, { name: starLabel(uri, item.name), at: Number(item.at) || Date.now() })
+        }
+        return map
+    }
+
+    function dispatchStarChanged() {
+        try { window.dispatchEvent(new CustomEvent('tree-nav-star-changed')) } catch {}
+    }
+
+    let starred = loadGuestStarred()
+    let starredUser = ''
+    let starredSeq = 0
+    let starPushChain = Promise.resolve()
+
+    async function loadStarsForCurrentUser() {
+        const user = currentUsername()
+        const seq = ++starredSeq
+        if (!user) {
+            starred = loadGuestStarred()
+            starredUser = ''
+            dispatchStarChanged()
+            return
+        }
+        if (typeof HFS.customRestCall !== 'function') {
+            starred = loadGuestStarred()
+            starredUser = ''
+            dispatchStarChanged()
+            return
+        }
+        try {
+            const res = await HFS.customRestCall('treeStars_get')
+            if (seq !== starredSeq || currentUsername() !== user) return
+            if (!res || !res.ok) {
+                starred = loadGuestStarred()
+                starredUser = ''
+                dispatchStarChanged()
+                return
+            }
+            const stars = Array.isArray(res.stars) ? res.stars : []
+            starred = serverStarsToMap(stars)
+            starredUser = user
+            dispatchStarChanged()
+        } catch {
+            if (seq !== starredSeq) return
+            starred = loadGuestStarred()
+            starredUser = ''
+            dispatchStarChanged()
+        }
+    }
+
+    async function refreshServerStars() {
+        const user = currentUsername()
+        if (!user || typeof HFS.customRestCall !== 'function') return false
+        if (starredUser !== user) {
+            await loadStarsForCurrentUser()
+            return true
+        }
+        try {
+            const res = await HFS.customRestCall('treeStars_get')
+            if (!res || !res.ok || currentUsername() !== user) return false
+            const next = serverStarsToMap(res.stars)
+            if (starredSignature(next) === starredSignature(starred)) return false
+            starred = next
+            starredUser = user
+            dispatchStarChanged()
+            return true
+        } catch { return false }
+    }
+
+    // 讀回其他分頁寫入的訪客星標；登入帳號以伺服器資料為準
     function refreshStarredFromStorage() {
+        if (currentUsername()) return false
         if (!STORAGE_OK) return false
-        const next = loadStarred()
+        const next = loadGuestStarred()
         if (starredSignature(next) === starredSignature(starred)) return false
         starred = next
+        starredUser = ''
         return true
     }
 
-    let starred = loadStarred()
     function isStarred(uri) { return starred.has(canonicalUri(uri)) }
+
     function toggleStar(uri, name) {
         uri = canonicalUri(uri)
-        // 以畫面上目前看到的狀態決定這次點擊是「加」還是「減」
         const currentlyStarred = starred.has(uri)
+        const user = currentUsername()
+        const label = starLabel(uri, name)
 
-        // ★ 先讀 localStorage 的最新內容再套用本次變更。
-        //   不能用模組載入時的快照整份寫回，否則會蓋掉其他分頁剛加的星標。
-        const next = STORAGE_OK ? loadStarred() : new Map(starred)
-
-        if (currentlyStarred) {
-            next.delete(uri)
-        } else {
-            let n = name
-            if (n == null || n === '') {
-                const parts = uri.split('/').filter(Boolean)
-                n = parts.length ? decodeName(parts[parts.length - 1]) : getRootLabel()
-            }
-            next.set(uri, n)
+        // Signed-in: persist in the account's server-side path library.
+        if (user && typeof HFS.customRestCall === 'function') {
+            const shouldStar = !currentlyStarred
+            const next = new Map(starred)
+            if (shouldStar) next.set(uri, { name: label, at: Date.now() })
+            else next.delete(uri)
+            starred = next
+            starredUser = user
+            dispatchStarChanged()
+            const seq = ++starredSeq
+            starPushChain = starPushChain.then(() => HFS.customRestCall('treeStars_toggle', {
+                path: uri,
+                name: label,
+                starred: shouldStar,
+            })).then(res => {
+                if (seq !== starredSeq) return
+                if (res && res.ok && Array.isArray(res.stars)) {
+                    starred = serverStarsToMap(res.stars)
+                    starredUser = user
+                    dispatchStarChanged()
+                }
+            }).catch(() => {})
+            return
         }
+
+        // Guest: temporary local cache (7 days).
+        const next = STORAGE_OK ? loadGuestStarred() : new Map(starred)
+        if (currentlyStarred) next.delete(uri)
+        else next.set(uri, { name: label, at: Date.now() })
         starred = next
-        saveStarred(starred)
-        try { window.dispatchEvent(new CustomEvent('tree-nav-star-changed')) } catch {}
+        starredUser = ''
+        saveGuestStarred(starred)
+        dispatchStarChanged()
     }
+
+    // Persist the current Map order (starred list drag-reorder).
+    function persistStarOrder() {
+        dispatchStarChanged()
+        const user = currentUsername()
+        if (user && typeof HFS.customRestCall === 'function') {
+            const payload = Array.from(starred.entries()).map(([uri, value]) => ({
+                path: uri,
+                name: value && value.name ? value.name : starLabel(uri),
+                at: (value && value.at) || Date.now(),
+            }))
+            HFS.customRestCall('treeStars_set', { stars: payload }).then(res => {
+                if (!res || !res.ok || !Array.isArray(res.stars)) return
+                if (currentUsername() !== user) return
+                starred = serverStarsToMap(res.stars)
+                starredUser = user
+                dispatchStarChanged()
+            }).catch(() => {})
+        } else {
+            saveGuestStarred(starred)
+        }
+    }
+
+    if (currentUsername()) setTimeout(loadStarsForCurrentUser, 0)
+    try {
+        if (typeof HFS.watchState === 'function') {
+            HFS.watchState('username', () => { loadStarsForCurrentUser() })
+        }
+    } catch {}
 
     function decodeName(s) {
         if (!s) return ''
@@ -1272,22 +1421,168 @@ function getRootLabel() {
     }
 
     function StarredSection({ currentUri, onNavigate, starVersion }) {
+        const sectionRef = React.useRef(null)
+        const dragRef = React.useRef(null)
+        const dragOrderRef = React.useRef(null)
+        const suppressClickRef = React.useRef(false)
+        const [dragUri, setDragUri] = React.useState(null)
+        const [dragOrder, setDragOrder] = React.useState(null)
+
         const items = React.useMemo(() => {
-            return Array.from(starred.entries())
-                .map(([uri, name]) => ({ uri, name }))
-                .sort((a, b) => a.name.localeCompare(b.name))
-        }, [starVersion])
+            const base = Array.from(starred.entries())
+                .map(([uri, value]) => ({ uri, name: value && value.name ? value.name : starLabel(uri) }))
+            if (!dragOrder) return base
+            const byUri = new Map(base.map(it => [it.uri, it]))
+            return dragOrder.map(uri => byUri.get(uri)).filter(Boolean)
+        }, [starVersion, dragOrder])
+
+        const clearPress = () => {
+            const d = dragRef.current
+            if (!d) return
+            if (d.timer) {
+                clearTimeout(d.timer)
+                d.timer = null
+            }
+            if (!d.active) dragRef.current = null
+        }
+
+        React.useEffect(() => () => {
+            const d = dragRef.current
+            if (d) {
+                if (d.timer) clearTimeout(d.timer)
+                if (d.move) window.removeEventListener('pointermove', d.move)
+                if (d.up) {
+                    window.removeEventListener('pointerup', d.up)
+                    window.removeEventListener('pointercancel', d.up)
+                }
+            }
+            document.body.classList.remove('tree-star-dragging')
+        }, [])
+
+        const onWindowPointerMove = e => {
+            const d = dragRef.current
+            if (!d || !d.active || e.pointerId !== d.pointerId) return
+            if (e.cancelable) e.preventDefault()
+            const section = sectionRef.current
+            if (!section) return
+            const rows = Array.from(section.querySelectorAll('.tree-starred-row'))
+            let target = 0
+            for (const row of rows) {
+                if (row.getAttribute('data-uri') === d.uri) continue
+                const rect = row.getBoundingClientRect()
+                if (e.clientY > rect.top + rect.height / 2) target++
+            }
+            setDragOrder(prev => {
+                if (!prev) return prev
+                const next = prev.filter(uri => uri !== d.uri)
+                next.splice(Math.min(target, next.length), 0, d.uri)
+                if (next.join('\u0001') === prev.join('\u0001')) return prev
+                dragOrderRef.current = next
+                return next
+            })
+        }
+
+        const finishDrag = e => {
+            const d = dragRef.current
+            if (!d) return
+            if (d.timer) {
+                clearTimeout(d.timer)
+                d.timer = null
+            }
+            dragRef.current = null
+            if (d.move) window.removeEventListener('pointermove', d.move)
+            if (d.up) {
+                window.removeEventListener('pointerup', d.up)
+                window.removeEventListener('pointercancel', d.up)
+            }
+            if (!d.active) return
+            document.body.classList.remove('tree-star-dragging')
+            const order = dragOrderRef.current
+            if (order && order.length) {
+                const next = new Map()
+                for (const uri of order) {
+                    const value = starred.get(uri)
+                    if (value) next.set(uri, value)
+                }
+                for (const [uri, value] of starred) if (!next.has(uri)) next.set(uri, value)
+                starred = next
+                persistStarOrder()
+            }
+            setDragUri(null)
+            setDragOrder(null)
+            dragOrderRef.current = null
+            suppressClickRef.current = true
+            setTimeout(() => { suppressClickRef.current = false }, 600)
+        }
+
+        const beginDrag = (row, pointerId) => {
+            const uri = row.getAttribute('data-uri')
+            dragOrderRef.current = Array.from(starred.keys())
+            const move = e => onWindowPointerMove(e)
+            const up = e => finishDrag(e)
+            dragRef.current = { uri, pointerId, active: true, move, up }
+            setDragUri(uri)
+            setDragOrder(dragOrderRef.current)
+            suppressClickRef.current = true
+            document.body.classList.add('tree-star-dragging')
+            window.addEventListener('pointermove', move, { passive: false })
+            window.addEventListener('pointerup', up)
+            window.addEventListener('pointercancel', up)
+            setTimeout(() => { suppressClickRef.current = false }, 1200)
+        }
+
+        const onRowPointerDown = e => {
+            if (e.button !== undefined && e.button !== 0) return
+            if (e.target.closest && e.target.closest('.tree-starred-icon')) return
+            clearPress()
+            const row = e.currentTarget
+            const pointerId = e.pointerId
+            const startX = e.clientX
+            const startY = e.clientY
+            const timer = setTimeout(() => {
+                if (!row.isConnected) return
+                beginDrag(row, pointerId)
+            }, 420)
+            dragRef.current = { timer, pointerId, startX, startY, active: false }
+        }
+
+        const onRowPointerMove = e => {
+            const d = dragRef.current
+            if (!d || d.active) return
+            if (Math.abs(e.clientX - d.startX) > 8 || Math.abs(e.clientY - d.startY) > 8) clearPress()
+        }
+
+        const onRowPointerUp = () => {
+            const d = dragRef.current
+            if (d && !d.active) clearPress()
+        }
+
+        const onRowClick = (e, uri) => {
+            if (suppressClickRef.current) {
+                suppressClickRef.current = false
+                e.preventDefault()
+                e.stopPropagation()
+                return
+            }
+            onNavigate(uri)
+        }
 
         if (items.length === 0) return null
 
-        return h('div', { className: 'tree-starred-section' },
+        return h('div', { className: 'tree-starred-section', ref: sectionRef },
             items.map(it => {
                 const isCurrent = currentUri === it.uri
                 return h('div', {
                     key: it.uri,
-                    className: 'tree-starred-row' + (isCurrent ? ' current' : ''),
+                    className: 'tree-starred-row' + (isCurrent ? ' current' : '') + (dragUri === it.uri ? ' is-dragging' : ''),
                     title: it.uri,
-                    onClick: () => onNavigate(it.uri),
+                    'data-uri': it.uri,
+                    onClick: e => onRowClick(e, it.uri),
+                    onPointerDown: onRowPointerDown,
+                    onPointerMove: onRowPointerMove,
+                    onPointerUp: onRowPointerUp,
+                    onPointerCancel: onRowPointerUp,
+                    onPointerLeave: () => { const d = dragRef.current; if (d && !d.active) clearPress() },
                 },
                     h('span', { className: 'tree-starred-main' }, [
                         h('button', {
@@ -1349,6 +1644,7 @@ function getRootLabel() {
             // 分頁被凍結/從 bfcache 回來時，storage 事件可能漏掉，再對一次
             const onVisible = () => {
                 if (document.visibilityState !== 'visible') return
+                if (currentUsername()) { refreshServerStars(); return }
                 if (refreshStarredFromStorage()) setStarVersion(v => v + 1)
             }
 

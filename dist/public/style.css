@@ -988,6 +988,8 @@ body.tree-resizing .bottom-bar-stack-positioner {
     border-radius: 3px;
     color: var(--text);
     white-space: nowrap;
+    touch-action: none;
+    user-select: none;
     transition: background-color .15s ease, color .15s ease;
 }
 .tree-starred-row:hover {
@@ -999,6 +1001,14 @@ body.tree-resizing .bottom-bar-stack-positioner {
 }
 .tree-starred-row.current:hover {
     background: transparent;
+}
+.tree-starred-row.is-dragging {
+    background: var(--ghost-contrast);
+    opacity: .85;
+}
+body.tree-star-dragging {
+    user-select: none;
+    cursor: grabbing;
 }
 .tree-starred-main {
     display: inline-flex;
