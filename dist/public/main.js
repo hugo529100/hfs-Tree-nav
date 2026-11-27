@@ -1743,6 +1743,21 @@ h('div', { className: 'tree-header' },
         const [tempMobHeight, setTempMobHeight] = React.useState(loadMobHeight)
 
         React.useEffect(() => {
+            const syncHeaderHeight = () => {
+                const header = document.querySelector('.list-wrapper > header')
+                if (!header) return
+                document.body.style.setProperty('--hfs-header-h', header.getBoundingClientRect().height + 'px')
+            }
+            syncHeaderHeight()
+            const t = setTimeout(syncHeaderHeight, 400)
+            window.addEventListener('resize', syncHeaderHeight)
+            return () => {
+                clearTimeout(t)
+                window.removeEventListener('resize', syncHeaderHeight)
+            }
+        }, [open])
+
+        React.useEffect(() => {
             document.body.classList.toggle('hfs-tree-open', open)
             document.body.classList.add('hfs-tree-layout')
 

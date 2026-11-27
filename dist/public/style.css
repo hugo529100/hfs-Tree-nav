@@ -159,6 +159,7 @@ body.tree-resizing .tree-resizer-grip {
     padding: 0;
     border: none;
     outline: none;
+    touch-action: manipulation;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -282,6 +283,18 @@ body.tree-resizing .tree-resizer-grip {
     .tree-fab.collapsed:hover .tree-fab-line {
         color: var(--text);
         opacity: 1;
+    }
+}
+
+/* 觸控裝置：沿著螢幕邊緣放大命中區，盡量不伸入頁面按鈕 */
+@media (pointer: coarse) and (orientation: landscape) {
+    .tree-fab.collapsed::before {
+        inset: -16px -10px -16px 0;
+    }
+}
+@media (pointer: coarse) and (orientation: portrait) {
+    .tree-fab.collapsed::before {
+        inset: 0 -16px -12px -16px;
     }
 }
 
@@ -539,6 +552,12 @@ body.tree-resizing .tree-resizer-grip {
     }
     body.hfs-tree-layout:not(.hfs-tree-open) header {
         top: 0;
+    }
+
+    /* HFS 的 filter-bar 是 sticky，原本 sticky 在 header 高度；樹展開時
+       header 已下移，filter-bar 也要跟著下移同樣距離，否則會藏在頂欄下面 */
+    body.hfs-tree-layout.hfs-tree-open #filter-bar {
+        top: calc(var(--tree-mobile-h) + var(--hfs-header-h, 82px));
     }
 
     body.hfs-tree-layout > #root {
